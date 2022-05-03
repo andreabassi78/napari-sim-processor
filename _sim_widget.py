@@ -805,12 +805,11 @@ if __name__ == '__main__':
     
     viewer = napari.Viewer()
     widget = SimAnalysis(viewer)
-    selection = magicgui(widget.select_layer, call_button='Select image layer')
     
     reshape_widget = reshape()
-    
     viewer.window.add_dock_widget(reshape_widget, name = 'Reshape stack', add_vertical_stretch = True)
     
+    selection = magicgui(widget.select_layer, call_button='Select image layer')
     viewer.window.add_dock_widget(selection,
                                   name = 'Image layer selection',
                                   add_vertical_stretch = True)
@@ -818,5 +817,4 @@ if __name__ == '__main__':
     viewer.window.add_dock_widget(widget,
                                   name = 'HexSim analyzer @Polimi',
                                   add_vertical_stretch = True)
-
     napari.run()      
