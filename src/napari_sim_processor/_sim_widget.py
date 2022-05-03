@@ -2,7 +2,7 @@
 """
 Created on Tue Jan 25 16:34:41 2022
 
-@author: Andrea Bassi @Polimi
+@author: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
 from widget_settings import Setting
 from hexSimProcessor import HexSimProcessor
