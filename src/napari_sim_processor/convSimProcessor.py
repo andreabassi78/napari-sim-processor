@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy import pi
 
-from napari_sim_processor.baseSimProcessor import BaseSimProcessor
+from baseSimProcessor import BaseSimProcessor
 
 class ConvSimProcessor(BaseSimProcessor):
     '''

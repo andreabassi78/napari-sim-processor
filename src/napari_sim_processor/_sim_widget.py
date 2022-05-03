@@ -4,32 +4,91 @@ Created on Tue Jan 25 16:34:41 2022
 
 @author: Andrea Bassi @Polimi
 """
-from napari_sim_processor.widget_settings import Setting
-from napari_sim_processor.hexSimProcessor import HexSimProcessor
-from napari_sim_processor.convSimProcessor import ConvSimProcessor
-from napari_sim_processor.simProcessor import SimProcessor 
+from widget_settings import Setting
+from hexSimProcessor import HexSimProcessor
+from convSimProcessor import ConvSimProcessor
+from simProcessor import SimProcessor 
 import napari
 from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton
 from napari.layers import Image
 import numpy as np
 from napari.qt.threading import thread_worker
-from magicgui import magicgui, magic_factory
+from magicgui import magic_factory
 import warnings
 
-@magic_factory
+@magic_factory(call_button="Reshape stack",
+                x={'max': 4096},
+                y={'max': 4096},
+                order={"choices": ['apzyx', 'pazyx', 'pzayx', 'azpyx']},
+                )
 def reshape(viewer: napari.Viewer,
-            image_layer: Image,
+            input_image: Image,
+            input_order = 'apzyx',
             angles:int=1, phases:int=1,
-            z:int=1, y:int=1, x:int=1):
-    
-    data = image_layer.data
+            z:int=1, y:int=1, x:int=1
+            ):
+    '''
+    Reshape image to a 5D stack (angle,phase,z,y,x).
+    Parameters
+    ----------
+    viewer : napari.Viewer
+        Current viewer
+    image_layer : Image
+        Input image to reshape.
+    order : str
+        Order of the input image. 
+        a (angles), p (phases),
+        z (slices), y-x (pixels)
+        The default is 'apzyx'.
+    angles : int
+        Number of angles in the reshaped image. 
+    phases : int
+        Number of phases in the reshaped image. 
+    z : int
+        Number of slices in the reshaped image. 
+    y : int
+        Number of y pixels in the reshaped image. 
+    x : int
+        Number of x pixels in the reshaped image. It is automatically found on image change.
+    '''
+    data = input_image.data
     if angles*phases*z*y*x != data.size:
         raise(ValueError('Image_layer cannot be reshaped to the given values'))
     else:
-        rdata = data.reshape(angles, phases, z, y, x)
-        image_layer.data = rdata
+        if input_order == 'apzyx':
+            rdata = data.reshape(angles, phases, z, y, x)
+        elif input_order == 'pazyx':
+            #rdata = np.swapaxes(data.reshape(phases, angles, z, y, x),0,1)
+            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x),[0,1],[1,0])
+        elif input_order == 'pzayx':
+            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x),[0,1,2],[1,2,0])
+        elif input_order == 'azpyx':
+            rdata = np.moveaxis(data.reshape(angles, z, phases, y, x),[1,2],[2,1])
+        else:
+            raise(ValueError('Input stack order reshaping not implemented'))
+        input_image.data = rdata
         viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
-        
+
+#call the decorated reshape function to create the corresponding widget 
+reshape_widget = reshape()    
+
+@reshape_widget.input_image.changed.connect
+def _on_image_changed(input_image: Image):
+    shape = input_image.data.shape
+    ndim = len(shape)
+    if ndim < 3:
+        raise(ValueError('Please select a >3D image'))
+    sz,sy,sx = shape[-3::]
+    reshape_widget.z.value = sz
+    reshape_widget.y.value = sy
+    reshape_widget.x.value = sx
+    sp = shape[-4]  if ndim >3 else 1
+    reshape_widget.phases.value = sp
+    sa = shape[-5] if ndim > 4 else 1 
+    reshape_widget.angles.value = sa
+    if ndim > 5:
+        raise(ValueError('Stack dimension >5D not supported'))
+
 
 class SimAnalysis(QWidget):
     '''
@@ -54,7 +113,10 @@ class SimAnalysis(QWidget):
     def __init__(self, napari_viewer):
         self.viewer = napari_viewer
         super().__init__()
+        self.select_layer_widget = self.select_layer()
         self.setup_ui() # run setup_ui before instanciating the settings
+        
+        
         self.start_sim_processor()
         self.viewer.dims.events.current_step.connect(self.on_step_change)
         
@@ -158,33 +220,28 @@ class SimAnalysis(QWidget):
             button.clicked.connect(call_function)
             right_layout.addWidget(button) 
             
-        
+    @magic_factory    
     def select_layer(self, image: Image):
         '''
-        Selects a Image layer assuming that it contains raw sim data organized
-        as a stack, organized in one of the three following way:
-            3D (phase,y,x)
-            4D (phase,z,y,x)
-            5D(angle,phase,z,y,x)'
-        Changes the size of the Imagae layer to 5D (angle,phase,z,y,x), updated the labels and resets the Processor.
+        Selects a Image layer after chaking that it contains raw sim data organized
+        as a 5D stack (angle,phase,z,y,x).
         Stores the name of the image in self.imageRaw_name, which is used frequently in the other methods.
+        Parameters
+        ----------
+        image : napari.layers.Image
+            The image layer to process, it contains the raw data 
         '''
         if not isinstance(image, Image):
             return
         if hasattr(self,'imageRaw_name'):
             delattr(self,'imageRaw_name')
         data = image.data
-        if data.ndim == 5:
-            pass
-        elif data.ndim == 4:
-            image.data = data[np.newaxis,...]
-        elif data.ndim == 3:
-            image.data = data[np.newaxis,:,np.newaxis,...]
-        else:
-            raise(KeyError('Please select a valid 3D(phase,y,x), 4D(phase,z,y,x) or 5D(angle,phase,z,y,x) stack'))
+        if data.ndim != 5:
+            raise(KeyError('Please select a 5D(angle,phase,z,y,x) stack'))
         self.imageRaw_name = image.name
         sa,sp,sz,sy,sx = image.data.shape
-        assert sy == sx, 'Non-square images are not supported'
+        if not sy == sx:
+            raise(KeyError('Non-square images are not supported'))
         self.angles_number.val = sa
         self.phases_number.val = sp
         self.viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
@@ -797,22 +854,27 @@ class SimAnalysis(QWidget):
         plt.show()
         plt.rcParams.update(plt.rcParamsDefault)
 
-        
+
+
+
+
 
 if __name__ == '__main__':
     
     import napari
     
     viewer = napari.Viewer()
-    widget = SimAnalysis(viewer)
     
-    reshape_widget = reshape()
+    widget = SimAnalysis(viewer)
+        
+    
     viewer.window.add_dock_widget(reshape_widget, name = 'Reshape stack', add_vertical_stretch = True)
     
-    selection = magicgui(widget.select_layer, call_button='Select image layer')
-    viewer.window.add_dock_widget(selection,
-                                  name = 'Image layer selection',
-                                  add_vertical_stretch = True)
+    #selection = magic_factory(widget.select_layer, call_button='Select image layer')
+    
+    # viewer.window.add_dock_widget(widget.select_layer(),
+    #                               name = 'Image layer selection',
+    #                               add_vertical_stretch = True)
     
     viewer.window.add_dock_widget(widget,
                                   name = 'HexSim analyzer @Polimi',
