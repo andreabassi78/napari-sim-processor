@@ -1,0 +1,17 @@
+name: napari-sim-processor
+display_name: napari SIM processor
+contributions:
+  commands: 
+    - id: napari-sim-processor.make_sim_widget
+      python_name: napari_sim_processor._widget:SimAnalysis
+      title: SIM processor
+    - id: napari-sim-processor.make_reshape_widget
+      python_name: napari_sim_processor._widget:reshape
+      title: Reshape stack
+  
+  widgets:
+    - command: napari-sim-processor.make_sim_widget
+      display_name: SIM processor
+    - command: napari-sim-processor.make_reshape_widget
+      display_name: Reshape stack to 5D (angles,phases,z,y,x)
+

@@ -1,0 +1,822 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jan 25 16:34:41 2022
+
+@author: Andrea Bassi @Polimi
+"""
+from napari_sim_processor.widget_settings import Setting
+from napari_sim_processor.hexSimProcessor import HexSimProcessor
+from napari_sim_processor.convSimProcessor import ConvSimProcessor
+from napari_sim_processor.simProcessor import SimProcessor 
+import napari
+from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton
+from napari.layers import Image
+import numpy as np
+from napari.qt.threading import thread_worker
+from magicgui import magicgui, magic_factory
+import warnings
+
+@magic_factory
+def reshape(viewer: napari.Viewer,
+            image_layer: Image,
+            angles:int=1, phases:int=1,
+            z:int=1, y:int=1, x:int=1):
+    
+    data = image_layer.data
+    if angles*phases*z*y*x != data.size:
+        raise(ValueError('Image_layer cannot be reshaped to the given values'))
+    else:
+        rdata = data.reshape(angles, phases, z, y, x)
+        image_layer.data = rdata
+        viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
+        
+
+class SimAnalysis(QWidget):
+    '''
+    Napari widget for reconstruction of Structured Illumination microscopy (SIM) data.
+    Accelerated with pytorch, if installed.
+    Currently supports:    
+        - conventional data with improved resolution in 1D (1 angle, 3 phases)
+        - conventional data (3 angles, 3 phases)
+        - hexagonal SIM (7 phases).
+    Accepts image stacks organized in one of th following ways:
+        3D (phase,y,x)
+        4D (phase,z,y,x)
+        5D(angle,phase,z,y,x)'
+    Support for N angles, N phases is in progress.
+    For 3D stacks with multiple (z) planes it processes each plane as in:
+        https://doi.org/10.1098/rsta.2020.0162
+    Support for 3D SIM with enhanced resolution in all direction not yet supported.     
+    '''
+
+    name = 'SIM_Analysis'
+    
+    def __init__(self, napari_viewer):
+        self.viewer = napari_viewer
+        super().__init__()
+        self.setup_ui() # run setup_ui before instanciating the settings
+        self.start_sim_processor()
+        self.viewer.dims.events.current_step.connect(self.on_step_change)
+        
+    def setup_ui(self):     
+        
+        def add_section(_layout):
+            from qtpy.QtCore import Qt
+            splitter = QSplitter(Qt.Vertical)
+            _layout.addWidget(splitter)
+            #_layout.addWidget(QLabel(_title))
+            
+        # initialize layout
+        layout = QHBoxLayout()
+        self.setLayout(layout)
+        left_layout = QVBoxLayout()
+        add_section(left_layout)
+        layout.addLayout(left_layout)
+        right_layout = QVBoxLayout()
+        add_section(right_layout)
+        layout.addLayout(right_layout)
+        # Fill left layout  
+        self.phases_number = Setting('phases', dtype=int, initial=7, layout=left_layout, 
+                              write_function = self.reset_processor)
+        self.angles_number = Setting('angles', dtype=int, initial=1, layout=left_layout, 
+                              write_function = self.reset_processor)
+        self.magnification = Setting('M', dtype=float, initial=60,  
+                                      layout=left_layout, write_function = self.setReconstructor)
+        self.NA = Setting('NA', dtype=float, initial=1.05, layout=left_layout, 
+                                       write_function = self.setReconstructor)
+        self.n = Setting(name ='n', dtype=float, initial=1.33,  spinbox_decimals=2,
+                                      layout=left_layout, write_function = self.setReconstructor)
+        self.wavelength = Setting('\u03BB', dtype=float, initial=0.570,
+                                       layout=left_layout,  spinbox_decimals=2, unit = '\u03BCm',
+                                       write_function = self.setReconstructor)
+        self.pixelsize = Setting('pixel size', dtype=float, initial=6.50, layout=left_layout,
+                                  spinbox_decimals=2, unit = '\u03BCm',
+                                  write_function = self.setReconstructor)
+        self.dz = Setting('dz', dtype=float, initial=0.55, layout=left_layout,
+                                  spinbox_decimals=2, unit = '\u03BCm',
+                                  write_function = self.rescaleZ)
+        self.alpha = Setting('alpha', dtype=float, initial=0.5,  spinbox_decimals=2, 
+                              layout=left_layout, write_function = self.setReconstructor)
+        self.beta = Setting('beta', dtype=float, initial=0.980, spinbox_step=0.01, 
+                             layout=left_layout,  spinbox_decimals=3,
+                             write_function = self.setReconstructor)
+        self.w = Setting('w', dtype=float, initial=0.5, layout=left_layout,
+                              spinbox_decimals=2,
+                              write_function = self.setReconstructor)
+        self.eta = Setting('eta', dtype=float, initial=0.65,
+                            layout=left_layout, spinbox_decimals=3, spinbox_step=0.01,
+                            write_function = self.setReconstructor)
+        self.group = Setting('group', dtype=int, initial=30, vmin=2,
+                            layout=left_layout,
+                            write_function = self.setReconstructor)
+        self.use_phases = Setting('use phases', dtype=bool, initial=True, layout=left_layout,                         
+                                   write_function = self.setReconstructor)
+        self.find_carrier = Setting('find carrier', dtype=bool, initial=True,
+                                     layout=left_layout, 
+                                     write_function = self.setReconstructor) 
+        # Fill right layout    
+        self.showXcorr = Setting('Show Xcorr', dtype=bool, initial=False,
+                                     layout=right_layout,
+                                     write_function = self.show_xcorr
+                                     )
+        self.showSpectrum = Setting('Show Spectrum', dtype=bool, initial=False,
+                                     layout=right_layout,
+                                     write_function = self.show_spectrum
+                                     )
+        self.showWiener = Setting('Show Wiener filter', dtype=bool, initial=False,
+                                     layout=right_layout,
+                                     write_function = self.show_wiener
+                                     )
+        self.showEta = Setting('Show Eta circle', dtype=bool, initial=False,
+                                     layout=right_layout,
+                                     write_function = self.show_eta
+                                     )
+        self.showCarrier = Setting('Show Carrier', dtype=bool, initial=False,
+                                     layout=right_layout,
+                                     write_function = self.show_carrier
+                                     )
+        self.keep_calibrating = Setting('Continuos Calibration', dtype=bool, initial=False,
+                                     layout=right_layout, 
+                                     write_function = self.setReconstructor)
+        self.keep_reconstructing = Setting('Continuos Reconstruction', dtype=bool, initial=False,
+                                     layout=right_layout, 
+                                     write_function = self.setReconstructor)
+        self.batch = Setting('Batch Reconstruction', dtype=bool, initial=False,
+                                     layout=right_layout, 
+                                     write_function = self.setReconstructor)
+        self.use_torch = Setting('Use Torch', dtype=bool, initial=False, layout=right_layout, 
+                           write_function = self.setReconstructor)         
+        buttons_dict = {'Widefield': self.calculate_WF_image,
+                        'Calibrate': self.calibration,
+                        'Plot calibration phases':self.find_phaseshifts,
+                        'SIM reconstruction': self.single_plane_reconstruction,
+                        'Stack SIM reconstruction': self.stack_reconstruction,
+                        'Stack demodulation': self.stack_demodulation,
+                        }
+        for button_name, call_function in buttons_dict.items():
+            button = QPushButton(button_name)
+            button.clicked.connect(call_function)
+            right_layout.addWidget(button) 
+            
+        
+    def select_layer(self, image: Image):
+        '''
+        Selects a Image layer assuming that it contains raw sim data organized
+        as a stack, organized in one of the three following way:
+            3D (phase,y,x)
+            4D (phase,z,y,x)
+            5D(angle,phase,z,y,x)'
+        Changes the size of the Imagae layer to 5D (angle,phase,z,y,x), updated the labels and resets the Processor.
+        Stores the name of the image in self.imageRaw_name, which is used frequently in the other methods.
+        '''
+        if not isinstance(image, Image):
+            return
+        if hasattr(self,'imageRaw_name'):
+            delattr(self,'imageRaw_name')
+        data = image.data
+        if data.ndim == 5:
+            pass
+        elif data.ndim == 4:
+            image.data = data[np.newaxis,...]
+        elif data.ndim == 3:
+            image.data = data[np.newaxis,:,np.newaxis,...]
+        else:
+            raise(KeyError('Please select a valid 3D(phase,y,x), 4D(phase,z,y,x) or 5D(angle,phase,z,y,x) stack'))
+        self.imageRaw_name = image.name
+        sa,sp,sz,sy,sx = image.data.shape
+        assert sy == sx, 'Non-square images are not supported'
+        self.angles_number.val = sa
+        self.phases_number.val = sp
+        self.viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
+        self.rescaleZ()
+        self.center_stack(image)
+        self.start_sim_processor()
+        self.move_layer_to_top(image)
+        self.showXcorr.val = False
+        self.showSpectrum.val = False
+        self.showEta.val = False
+        self.showCarrier.val = False
+        self.keep_calibrating.val = False
+        self.keep_reconstructing.val = False
+        print(f'Selected image layer: {image.name}')
+           
+            
+    def rescaleZ(self):
+        '''
+        changes the z-scale of all the Images in layer with shape >=3D
+        '''
+        self.zscaling = self.dz.val /(self.pixelsize.val/self.magnification.val)
+        for layer in self.viewer.layers:
+            if isinstance(layer, Image):
+                if layer.ndim >=3:
+                    scale = layer.scale 
+                    scale[-3] = self.zscaling
+                    layer.scale = scale
+      
+    def center_stack(self, image_layer):
+        '''
+        centers a >3D stack in z,y,x 
+        '''
+        data = image_layer.data
+        if data.ndim >2:
+            current_step = list(self.viewer.dims.current_step)
+            for dim_idx in [-3,-2,-1]:
+                current_step[dim_idx] = data.shape[dim_idx]//2
+            self.viewer.dims.current_step = current_step                
+           
+            
+    def on_step_change(self, *args):   
+        if hasattr(self, 'imageRaw_name'): #self.viewer.dims.ndim >3:
+            self.setReconstructor()
+            if self.showSpectrum.val:
+                 self.show_spectrum()
+            
+                 
+    def show_image(self, image_values, im_name, **kwargs):
+        '''
+        creates a new Image layer with image_values as data
+        or updates an existing layer, if 'hold' in kwargs is True 
+        '''
+        if 'scale' in kwargs.keys():    
+            scale = kwargs['scale']
+        else:
+            scale = [1.]*image_values.ndim
+        if 'colormap' in kwargs.keys():
+            colormap = kwargs['colormap']
+        else:
+            colormap = 'gray'    
+        if kwargs.get('hold') is True and im_name in self.viewer.layers:
+            layer = self.viewer.layers[im_name]
+            layer.data = image_values
+            layer.scale = scale
+        else:  
+            layer = self.viewer.add_image(image_values,
+                                            name = im_name,
+                                            scale = scale,
+                                            colormap = colormap,
+                                            interpolation = 'bilinear')
+        self.center_stack(image_values)
+        self.move_layer_to_top(layer)
+        if kwargs.get('autoscale') is True:
+            layer.reset_contrast_limits()
+        return layer
+
+
+    def remove_layer(self, layer):
+        if layer in self.viewer.layers:
+            self.viewer.layers.remove(layer.name)    
+    
+    
+    def move_layer_to_top(self, layer_to_move):
+        '''
+        Moves the layer to the top of the viewer and selects it
+        '''
+        for idx,layer in enumerate(self.viewer.layers):
+            #couldn't find a way to get the index of a certain layer directly from the Layer object
+            if layer is layer_to_move:
+                self.viewer.layers.move(idx, len(self.viewer.layers))
+                layer.visible = True
+                if isinstance(layer, Image):
+                    self.viewer.layers.selection = [layer]
+    
+    
+    def make_layers_visible(self, *layers_list):
+        '''
+        Makes all the passed layers visible, while making all the others invisible
+        '''
+        for layer in self.viewer.layers:
+            if layer in layers_list:
+                layer.visible = True
+            else:
+                layer.visible = False    
+    
+    
+    def is_image_in_layers(self):
+        '''
+        Checks if the raw image has been selected
+        '''
+        if hasattr(self, 'imageRaw_name'):
+            if self.imageRaw_name in self.viewer.layers:
+                return True
+        return False   
+    
+    
+    def get_hyperstack(self):
+        '''
+        Returns the full 5D raw image stack
+        '''
+        try:
+            return self.viewer.layers[self.imageRaw_name].data
+        except:
+             raise(KeyError('Please select a valid stack'))
+    
+    
+    def get_current_stack(self):
+        '''
+        Returns the raw image stack at the z value selected in the viewer  
+        '''
+        fullstack = self.get_hyperstack()
+        z_index = int(self.viewer.dims.current_step[2])
+        s = fullstack.shape
+        assert z_index < s[-3], 'Please choose a valid z step for the selected stack'
+        stack = fullstack[:,:,z_index,:,:]
+        return stack
+    
+    
+    def get_current_image(self):
+        '''
+        Returns the raw image stack at the z, angle and phase values selected in the viewer  
+        '''
+        hs = self.get_hyperstack()
+        z_index = int(self.viewer.dims.current_step[2])
+        phase_index = int(self.viewer.dims.current_step[1])
+        angle_index = int(self.viewer.dims.current_step[0])   
+        img0 = hs[angle_index,phase_index,z_index,:,:]
+        return(img0)
+    
+    
+    def start_sim_processor(self):
+        ''''
+        Creates an instance of the Processor
+        '''
+        self.isCalibrated = False
+        if hasattr(self, 'h'):
+            self.stop_sim_processor()
+            self.start_sim_processor()
+        else:
+            if self.phases_number.val == 3 and self.angles_number.val == 1: 
+                self.h = SimProcessor()  
+                k_shape = (1,1)
+            elif self.phases_number.val == 7:  
+                self.h = HexSimProcessor()  
+                k_shape = (3,1)
+            elif self.phases_number.val == 3 and self.angles_number.val == 3: 
+                self.h = ConvSimProcessor()
+                k_shape = (3,1)
+            else: 
+                raise(ValueError("Invalid phases or angles number"))
+            self.h.debug = False
+            self.setReconstructor() 
+            self.kx_input = np.zeros(k_shape, dtype=np.single)
+            self.ky_input = np.zeros(k_shape, dtype=np.single)
+            self.p_input = np.zeros(k_shape, dtype=np.single)
+            self.ampl_input = np.zeros(k_shape, dtype=np.single)
+
+            
+    def stop_sim_processor(self):
+        if hasattr(self, 'h'):
+            delattr(self, 'h')
+  
+    
+    def reset_processor(self,*args):
+        self.isCalibrated = False
+        self.stop_sim_processor()
+        self.start_sim_processor()
+       
+    
+    def setReconstructor(self,*args):
+        '''
+        Sets the attributes of the Processor
+        Executed frequently, upon update of several settings
+        '''
+        if hasattr(self, 'h'):   
+            self.h.usePhases = self.use_phases.val
+            self.h.magnification = self.magnification.val
+            self.h.NA = self.NA.val
+            self.h.n = self.n.val
+            self.h.wavelength = self.wavelength.val
+            self.h.pixelsize = self.pixelsize.val
+            self.h.alpha = self.alpha.val
+            self.h.beta = self.beta.val
+            self.h.w = self.w.val
+            self.h.eta = self.eta.val
+            if not self.find_carrier.val:
+                self.h.kx = self.kx_input
+                self.h.ky = self.ky_input
+            if self.keep_calibrating.val:
+                self.calibration()
+            if self.keep_reconstructing.val:
+                self.single_plane_reconstruction()
+            if self.showEta.val:
+                self.show_eta()
+          
+            
+    def show_wiener(self, *args):
+        """
+        Shows the Wiener filter 
+        """
+        if self.is_image_in_layers():
+            imname = 'Wiener_' + self.imageRaw_name
+            if self.isCalibrated and self.showWiener.val:
+                
+                img = self.h.wienerfilter
+                swy,swx = img.shape
+                self.show_image(img[swy//2-swy//4:swy//2+swy//4,swx//2-swx//4:swx//2+swx//4],
+                                imname, hold = True, scale=[1,1])
+                self.show_carrier()
+                self.show_eta()
+            elif not self.showWiener.val and imname in self.viewer.layers:
+                self.remove_layer(self.viewer.layers[imname])
+                       
+            
+    def show_spectrum(self, *args):
+        """
+        Calculates and shows the power spectrum of the image
+        """
+        from numpy.fft import fft2, fftshift
+        if self.is_image_in_layers():
+            imname = 'Spectrum_' + self.imageRaw_name
+            if self.showSpectrum.val:
+                img0 = self.get_current_image()
+                epsilon = 1e-10
+                ps = np.log((np.abs(fftshift(fft2(img0))))**2+epsilon)
+                self.show_image(ps, imname, hold = True)
+                self.show_carrier()
+                self.show_eta()
+            elif not self.showSpectrum.val and imname in self.viewer.layers:
+                self.remove_layer(self.viewer.layers[imname])
+       
+     
+    def show_xcorr(self, *args):
+        """
+        Show the crosscorrelation of the low and high pass filtered version of the raw images,
+        used forfinding the carrier
+        """
+        if self.is_image_in_layers():
+            imname = 'Xcorr_' + self.imageRaw_name
+            if self.showXcorr.val and self.isCalibrated:
+                ixf = self.h.ixf
+                self.show_image(ixf, imname, hold = True,
+                                colormap ='twilight', autoscale = True)
+                self.show_carrier()
+                self.show_eta()
+            elif not self.showXcorr.val and imname in self.viewer.layers:
+                self.remove_layer(self.viewer.layers[imname])
+            
+     
+    def calculate_kr(self,N):  
+        '''
+        Parameter:
+            N: number of pixels of the image
+        Returns: 
+            cutoff: pupil cutoff frequency in pixels number
+            dk: sampling in spatial frequancy domain
+        '''
+        dx = self.h.pixelsize / self.h.magnification  # Sampling in image plane
+        res = self.h.wavelength / (2 * self.h.NA)
+        cutoff = 1/res/2 # coherent cutoff frequency
+        oversampling = res / dx
+        dk = oversampling / (N / 2)  
+        cutoff_in_pixels = cutoff / dk
+        return cutoff_in_pixels, dk   
+      
+      
+    def show_carrier(self, *args):
+        '''
+        Draws the carrier frenquencies in a shape layer
+        '''
+        if self.is_image_in_layers() and self.isCalibrated:
+            name = f'carrier_{self.imageRaw_name}'
+            if self.showCarrier.val:
+                N = self.h.N
+                cutoff, dk = self.calculate_kr(N)
+                kxs = self.h.kx
+                kys = self.h.ky
+                pc = np.zeros((len(kxs),2))
+                for idx, (kx,ky) in enumerate(zip(kxs,kys)):
+                    pc[idx,0] = ky[0] / dk + N/2
+                    pc[idx,1] = kx[0] / dk + N/2
+                radius = self.h.N // 30 # radius of the displayed circle 
+                self.add_circles(pc, radius, name, color='red')
+                # kr = np.sqrt(kxs**2+kys**2)
+                # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
+            elif name in self.viewer.layers:
+                self.remove_layer(self.viewer.layers[name])
+                
+           
+    def show_eta(self):
+        '''
+        Shows two circles with radius eta (green circle), 
+        and with the radius of the pupil (blue) 
+        '''
+        if self.is_image_in_layers():
+            name = f'eta_circle_{self.imageRaw_name}'
+            if self.showEta.val:
+                N = self.h.N
+                cutoff, dk   = self.calculate_kr(N)  
+                eta_radius = self.h.eta * cutoff
+                self.add_circles(np.array([N/2,N/2]), eta_radius,
+                               name, color='green')
+                self.add_circles(np.array([N/2,N/2]), cutoff,
+                               name, color='blue', hold=True)
+            elif name in self.viewer.layers:
+                self.remove_layer(self.viewer.layers[name])
+
+    def add_circles(self, locations, radius=20,
+                    shape_name='shapename', color='blue', hold=False
+                    ):
+        
+        '''
+        Creates a circle in a layer with yx coordinates speciefied in each row of locations
+        
+        Parameters
+        ----------
+        locations : np.array
+            yx coordinates of the centers. 
+        shape_name : str
+            name of the new Shape
+        radius : int 
+            radius of the circles.
+        color : str of RGBA list
+            color of the circles.
+        hold : bool
+            if True updates the existing layer, with name shape_name,
+            without creating a new layer
+        '''
+        ellipses = []
+        for center in locations: 
+            bbox = np.array([center+np.array([radius, radius]),
+                             center+np.array([radius,-radius]),
+                             center+np.array([-radius,-radius]),
+                             center+np.array([-radius, radius])]
+                            )
+            ellipses.append(bbox)
+        
+        if shape_name in self.viewer.layers: 
+            circles_layer = self.viewer.layers[shape_name]
+            if hold:
+                circles_layer.add_ellipses(ellipses, edge_color=color)
+            else:
+                circles_layer.data = np.array(ellipses)
+        else:  
+            circles_layer = self.viewer.add_shapes(name=shape_name,
+                                   edge_width = 1.3,
+                                   face_color = [1,1,1,0],
+                                   edge_color = color)
+            circles_layer.add_ellipses(ellipses, edge_color=color)
+        self.move_layer_to_top(circles_layer)   
+    
+    
+    def showCalibrationTable(self):
+        import pandas as pd
+        headers= ['kx_in','ky_in','kx','ky','phase','amplitude']
+        vals = [self.kx_input, self.ky_input,
+                self.h.kx, self.h.ky,
+                self.h.p,self.h.ampl]
+        table = pd.DataFrame([vals] , columns = headers )
+        print(table)
+            
+        
+    def stack_demodulation(self, *args):
+        '''
+        Demodulates the data as proposed in Neil et al, Optics Letters 1997.
+        '''
+        assert self.isCalibrated, 'SIM processor not calibrated'    
+        
+        fullstack = self.get_hyperstack()
+        sa,sp,sz,sy,sx = fullstack.shape
+        phases_angles = sa*sp
+        pa_stack = fullstack.reshape(phases_angles, sz, sy, sx)
+        demodulated = np.zeros([sz,sy,sx]).astype('float')
+        # if self.use_torch.val: TODO implement demodulation in torch, add to function call.astype(np.float32)
+        #     demodulation_function = self.h.OSreconstruct_pytorch
+        demodulation_function = self.h.filteredOSreconstruct
+        for frame_index in range(sz):
+            stack = np.squeeze(pa_stack[:,frame_index,:,:])
+            demodulated[frame_index,:,:] = np.squeeze(demodulation_function(stack))
+        imname = 'Demodulated_' + self.imageRaw_name
+        scale = [self.zscaling,1,1]
+        self.show_image(demodulated, imname, scale=scale, hold=True, autoscale=True)
+        #print('Stack demodulation completed')
+        
+    
+    def calculate_WF_image(self):
+        '''
+        Calculates and shows the widefield image from the raw 5D image stack.
+        It averages the data on all phases and angles.
+        Shows the resulting 3D image stack as an Image layer of the viewer.
+        '''
+        imageWFdata = np.mean(self.get_hyperstack(), axis=(0,1))
+        imname = 'WF_' + self.imageRaw_name
+        scale = self.viewer.layers[self.imageRaw_name].scale
+        self.show_image(imageWFdata, imname, scale = scale[2:], hold = True, autoscale = True)
+        
+    
+    def calibration(self, *args):
+        '''
+        Performs the data calibration using the Processor (self.h).
+        It is performed on a stack of images around the frame selected in the viewer.
+        The size of the stack is the value specified in the "group" Setting.
+        *args is to avoid conflic with the add_timer decorator
+        '''
+        if hasattr(self, 'h'):
+            data = self.get_hyperstack()
+            dshape = data.shape
+            zidx = int(self.viewer.dims.current_step[2])
+            delta = self.group.val // 2
+            remainer = self.group.val % 2
+            zmin = max(zidx-delta,0)
+            zmax = min(zidx+delta+remainer,dshape[2])
+            new_delta = zmax-zmin
+            data = data[...,zmin:zmax,:,:]
+            phases_angles = self.phases_number.val*self.angles_number.val
+            rdata = data.reshape(phases_angles, new_delta, dshape[-2],dshape[-1])            
+            selected_imRaw = np.swapaxes(rdata, 0, 1).reshape((phases_angles * new_delta, dshape[-2],dshape[-1]))
+            if self.use_torch.val:
+                self.h.calibrate_pytorch(selected_imRaw,self.find_carrier.val)
+            else:
+                self.h.calibrate(selected_imRaw,self.find_carrier.val)
+            self.isCalibrated = True
+            if self.find_carrier.val: # store the value found   
+                self.kx_input = self.h.kx  
+                self.ky_input = self.h.ky
+                self.p_input = self.h.p
+                self.ampl_input = self.h.ampl 
+            self.show_wiener()
+            self.show_xcorr()
+            self.show_carrier()
+            self.show_eta()
+            
+                   
+    def single_plane_reconstruction(self):
+        '''
+        Performs SIM reconstruction on the selected z plane.
+        '''
+        assert self.isCalibrated, 'SIM processor not calibrated, unable to perform SIM reconstruction'
+        current_image = self.get_current_stack()
+        dshape= current_image.shape
+        phases_angles = self.phases_number.val*self.angles_number.val
+        rdata = current_image.reshape(phases_angles, dshape[-2],dshape[-1])
+        if self.use_torch.val:
+            imageSIM = self.h.reconstruct_pytorch(rdata.astype(np.float32)) #TODO:this is left after conversion from torch
+        else:
+            imageSIM = self.h.reconstruct_rfftw(rdata)
+        imname = 'SIM_' + self.imageRaw_name
+        self.show_image(imageSIM, im_name=imname, scale=[0.5,0.5], hold =True, autoscale = True)
+    
+    
+    def stack_reconstruction(self):
+        '''
+        Performs SIM reconstruction on entire data (5D raw image stack).
+        Performs plane-by-plane reconstruction (_stack_reconstruction), 
+            calibrating the Processor continuosly if "Continuous calibration" checkbox is selected
+        Performs batch reconstruction if "Batch reconstrction" checkbox is selected
+        '''
+        def update_sim_image(stack):
+            imname = 'SIMstack_' + self.imageRaw_name
+            scale = [self.zscaling, 0.5, 0.5]
+            self.show_image(stack, im_name=imname, scale=scale, hold = True, autoscale = True)
+        
+        @thread_worker(connect={'returned': update_sim_image})
+        def _stack_reconstruction():
+            warnings.filterwarnings('ignore')
+            stackSIM = np.zeros([sz,2*sy,2*sx], dtype=np.single)
+            for zidx in range(sz):
+                phases_stack = np.squeeze(pa_stack[:,zidx,:,:])
+                if self.keep_calibrating.val:
+                    delta = self.group.val // 2
+                    if zidx % delta == 0: 
+                        remainer = self.group.val % 2
+                        zmin = max(zidx-delta,0)
+                        zmax = min(zidx+delta+remainer,sz)
+                        new_delta = zmax-zmin
+                        data = pa_stack[:,zmin:zmax,:,:]
+                        s_pa = data.shape[0]
+                        selected_imRaw = np.swapaxes(data, 0, 1).reshape((s_pa * new_delta, sy, sx))
+                        if self.use_torch.val:
+                            self.h.calibrate_pytorch(selected_imRaw,self.find_carrier.val)
+                        else:
+                            self.h.calibrate(selected_imRaw,self.find_carrier.val)                
+                if self.use_torch.val:
+                    stackSIM[zidx,:,:] = self.h.reconstruct_pytorch(phases_stack.astype(np.float32)) #TODO:this is left after conversion from torch
+                else:
+                    stackSIM[zidx,:,:] = self.h.reconstruct_rfftw(phases_stack)      
+            return stackSIM
+        
+        @thread_worker(connect={'returned': update_sim_image})
+        def _batch_reconstruction():
+            warnings.filterwarnings('ignore')
+            if self.use_torch.val:
+                stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize = 32)
+            else:
+                stackSIM = self.h.batchreconstructcompact(paz_stack)
+            return stackSIM
+        
+        # main function exetuted here
+        assert self.isCalibrated, 'SIM processor not calibrated, unable to perform SIM reconstruction'
+        fullstack = self.get_hyperstack()
+        sa,sp,sz,sy,sx = fullstack.shape
+        phases_angles = sa*sp
+        pa_stack = fullstack.reshape(phases_angles, sz, sy, sx)
+        paz_stack = np.swapaxes(pa_stack, 0, 1).reshape((phases_angles*sz, sy, sx))
+        if self.batch.val:
+            _batch_reconstruction()
+        else: 
+            _stack_reconstruction()
+                
+          
+    def find_phaseshifts(self):
+        assert self.isCalibrated, 'SIM processor not calibrated, unable to show phases'
+        if self.phases_number.val==7:
+            self.find_hexsim_phaseshifts()
+        elif self.phases_number.val==3 :
+            self.find_sim_phaseshifts()
+        
+    def find_hexsim_phaseshifts(self):   
+        phaseshift = np.zeros((7,3))
+        expected_phase = np.zeros((7,3))
+        error = np.zeros((7,3))
+        stack = self.get_current_stack()
+        sa,sp,sy,sx = stack.shape
+        img = stack.reshape(sa*sp, sy, sx) 
+        for i in range (3):
+            phase, _ = self.h.find_phase(self.h.kx[i], self.h.ky[i], img)
+            expected_phase[:,i] = np.arange(7) * 2*(i+1) * np.pi / 7
+            phaseshift[:,i] = np.unwrap(phase - phase[0])
+        error = phaseshift-expected_phase
+        data_to_plot = [expected_phase, phaseshift, error]
+        symbols = ['.','o','|']
+        legend = ['expected', 'measured', 'error']
+        self.plot_with_plt(data_to_plot, legend, symbols,
+                                xlabel = 'step', ylabel = 'phase (rad)', vmax = 6*np.pi)
+            
+    
+    def find_sim_phaseshifts(self):   
+        stack = self.get_current_stack()
+        sa,sp,sy,sx = stack.shape
+        img = stack.reshape(sa*sp, sy, sx)  
+        for angle_idx in range (sa):
+            phaseshift = np.zeros((sp,sa))
+            expected_phase = np.zeros((sp,sa))
+            error = np.zeros((sp,sa))
+            phase, _ = self.h.find_phase(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
+            phase = np.unwrap(phase)
+            phase = phase.reshape(sa,sp).T
+            expected_phase[:,angle_idx] = np.arange(sp) * 2*np.pi / sp
+            phaseshift= phase-phase[0,:]
+            error = phaseshift-expected_phase      
+            data_to_plot = [expected_phase, phaseshift, error]
+            symbols = ['.','o','|']
+            legend = ['expected', 'measured', 'error']
+            self.plot_with_plt(data_to_plot, legend, symbols, title = f'angle {angle_idx}',
+                                    xlabel = 'step', ylabel = 'phase (rad)', vmax = 2*np.pi)
+                             
+    
+    def plot_with_plt(self, data_list, legend, symbols,
+                      xlabel = 'step', ylabel = 'phase',
+                      vmax = 2*np.pi, title = ''):
+        import matplotlib.pyplot as plt
+        char_size = 10
+        plt.rc('font', family='calibri', size=char_size)
+        fig = plt.figure(figsize=(4,3), dpi=150)
+        ax = fig.add_subplot(111)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_xlabel(xlabel, size=char_size)
+        ax.set_ylabel(ylabel, size=char_size)
+        ax.set_title(title, size=char_size)
+        s = data_list[0].shape
+        cols = 1 if len(s)==1 else s[1]
+        colors = ('black','red','green')
+        for cidx in range(cols):
+            color = colors[cidx%3]
+            for idx, data in enumerate(data_list):
+                column = data if len(s)==1 else data[...,cidx]
+                marker = symbols[idx]
+                linewidth = 0.2 if marker == 'o' else 0.8
+                ax.plot(column, marker=marker, linewidth =linewidth, color=color)    
+       
+        ax.xaxis.set_tick_params(labelsize=char_size*0.75)
+        ax.yaxis.set_tick_params(labelsize=char_size*0.75)
+        ax.legend(legend, loc='best', frameon = False, fontsize=char_size*0.8)
+        ax.grid(True, which='major', axis='both', alpha=0.2)
+        vales_num = s[0]
+        ticks = np.linspace(0, vmax*(vales_num-1)/vales_num, 2*vales_num-1 )
+        ax.set_yticks(ticks)
+        fig.tight_layout()
+        plt.show()
+        plt.rcParams.update(plt.rcParamsDefault)
+
+        
+
+if __name__ == '__main__':
+    
+    import napari
+    
+    viewer = napari.Viewer()
+    widget = SimAnalysis(viewer)
+    selection = magicgui(widget.select_layer, call_button='Select image layer')
+    
+    reshape_widget = reshape()
+    
+    viewer.window.add_dock_widget(reshape_widget, name = 'Reshape stack', add_vertical_stretch = True)
+    
+    viewer.window.add_dock_widget(selection,
+                                  name = 'Image layer selection',
+                                  add_vertical_stretch = True)
+    
+    viewer.window.add_dock_widget(widget,
+                                  name = 'HexSim analyzer @Polimi',
+                                  add_vertical_stretch = True)
+
+    napari.run()      
