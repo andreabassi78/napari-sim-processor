@@ -3,10 +3,10 @@ Created on Tue Jan 25 16:34:41 2022
 
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from .widget_settings import Setting
-from .hexSimProcessor import HexSimProcessor
-from .convSimProcessor import ConvSimProcessor
-from .simProcessor import SimProcessor 
+from napari_sim_processor.widget_settings import Setting
+from napari_sim_processor.hexSimProcessor import HexSimProcessor
+from napari_sim_processor.convSimProcessor import ConvSimProcessor
+from napari_sim_processor.simProcessor import SimProcessor 
 import napari
 from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton
 from napari.layers import Image
