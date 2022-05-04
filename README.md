@@ -74,8 +74,11 @@ To install latest development version :
 9) Click on the checkboxes to show the power spectrum of the image or the cross-correlation, to see if the carrier frequency is found correctly
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture2.png)
 
-10) Run the reconstruction of a single plane (SIM reconstruction) or of a stack (Stack reconstruction). Click on the Batch reconstruction checkbox in order to process an entire stack in one shot. Click on the pytorch checkbox for gpu acceleration.
+10) Run the reconstruction of a single plane (SIM reconstruction) or of a stack (Stack reconstruction). After execution, a new image_layer will be added to the napari viewer. Click on the Batch reconstruction checkbox in order to process an entire stack in one shot. Click on the pytorch checkbox for gpu acceleration.
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture3.png)
+**Napari viewer with widgets showing a pseudo-widefield reconstruction**
+![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture3.png)
+**Napari viewer with widgets showing a SIM reconstruction**
 
 ## Contributing
 
