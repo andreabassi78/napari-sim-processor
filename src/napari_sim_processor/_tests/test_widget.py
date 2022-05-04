@@ -12,4 +12,3 @@ def test_reshape_widget(make_napari_viewer, capsys):
     reshape_widget = reshape()
     reshape_widget(viewer, viewer.layers[0],'apzyx',3,3,2,100,100)
     captured = capsys.readouterr()
-    
