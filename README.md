@@ -55,7 +55,7 @@ To install latest development version :
 2) Launch the reshape and sim-processor widgets.
 
 3) Open your raw image stack (using the napari built-in or your own file openers).
-
+![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture1.png)
 4) If your image ordered as a 5D stack (angle, phase, z-frame, y, x) go to point 4. 
 
 5) In the reshape widget, select the number of acquired angles, phases, and frames and press Reshape Stack. Note that the label axis of the viewer will be updated.
