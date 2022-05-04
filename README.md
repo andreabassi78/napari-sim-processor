@@ -55,10 +55,11 @@ To install latest development version :
 2) Launch the reshape and sim-processor widgets.
 
 3) Open your raw image stack (using the napari built-in or your own file openers).
-![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture1.png)
+
 4) If your image ordered as a 5D stack (angle, phase, z-frame, y, x) go to point 4. 
 
 5) In the reshape widget, select the number of acquired angles, phases, and frames and press Reshape Stack. Note that the label axis of the viewer will be updated.
+![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture1.png)
 
 6) In the sim-reconstruction widget press the Select image layer button. Note that the number of phases and angles will be updated. 
 
@@ -71,8 +72,10 @@ To install latest development version :
 8) Calibrate the SIM processor, pressing the correspondent button. This will find the carrier frequencies (red circles if the Show Carrier checkbox is selected), the modulation amplitude and the phase, using cross correlation analysis.
 
 9) Click on the checkboxes to show the power spectrum of the image or the cross-correlation, to see if the carrier frequency is found correctly
+![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture2.png)
 
 10) Run the reconstruction of a single plane (SIM reconstruction) or of a stack (Stack reconstruction). Click on the Batch reconstruction checkbox in order to process an entire stack in one shot. Click on the pytorch checkbox for gpu acceleration.
+![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture1.png)
 
 ## Contributing
 
