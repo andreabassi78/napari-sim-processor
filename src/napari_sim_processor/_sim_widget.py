@@ -4,10 +4,10 @@ Created on Tue Jan 25 16:34:41 2022
 
 @author: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from widget_settings import Setting
-from hexSimProcessor import HexSimProcessor
-from convSimProcessor import ConvSimProcessor
-from simProcessor import SimProcessor 
+from .widget_settings import Setting
+from .hexSimProcessor import HexSimProcessor
+from .convSimProcessor import ConvSimProcessor
+from .simProcessor import SimProcessor 
 import napari
 from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton
 from napari.layers import Image
@@ -889,4 +889,5 @@ if __name__ == '__main__':
                                   name = 'HexSim analyzer @Polimi',
                                   add_vertical_stretch = True)
     
-    napari.run()      
+    napari.run() 
+     

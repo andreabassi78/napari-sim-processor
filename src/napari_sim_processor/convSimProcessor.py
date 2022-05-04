@@ -49,4 +49,3 @@ class ConvSimProcessor(BaseSimProcessor):
             plt.title('Matrix')
             plt.imshow(np.abs(ret))
         return ret
-

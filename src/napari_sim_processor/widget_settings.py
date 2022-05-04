@@ -137,5 +137,3 @@ def add_timer(function):
         return result
     inner.__name__ = function.__name__
     return inner 
-
-
