@@ -1,7 +1,10 @@
 import numpy as np
 from numpy import pi
 
-from baseSimProcessor import BaseSimProcessor
+try:
+    from baseSimProcessor import BaseSimProcessor
+except:
+    pass
 
 class SimProcessor(BaseSimProcessor):
     '''

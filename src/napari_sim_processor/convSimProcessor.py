@@ -1,8 +1,10 @@
 import numpy as np
 from numpy import pi
 
-from baseSimProcessor import BaseSimProcessor
-
+try:
+    from baseSimProcessor import BaseSimProcessor
+except:
+    pass
 class ConvSimProcessor(BaseSimProcessor):
     '''
     Implements conventional SIM system with two beams, three angles and three phase steps
