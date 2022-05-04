@@ -64,7 +64,6 @@ class BaseSimProcessor:
     tdev = None     # torch device to use - if none, then will choose gpu if available and cpu otherwise.
     usePhases = False   # Whether to measure and use individual phases in calibration/reconstruction
     _lastN = 0      # To track changes in array size that will force array re-allocation
-    _M = None       # Mand reconstruction matrix
 
     def __init__(self):
         # self._nsteps = 0
@@ -380,41 +379,6 @@ class BaseSimProcessor:
             self._postfilter_cp = cp.asarray(self._postfilter)
         if pytorch:
             self._postfilter_torch = torch.as_tensor(self._postfilter, device=self.tdev)
-
-    def crossCorrelations(self, img):
-        '''Sum input images if there are more than self._nsteps'''
-        self.N = img.shape[-1]
-        if self._M is None:
-            self._dx = self.pixelsize / self.magnification  # Sampling in image plane
-            self._res = self.wavelength / (2 * self.NA)
-            self._oversampling = self._res / self._dx
-            self._dk = self._oversampling / (self.N / 2)  # Sampling in frequency plane
-            self._k = np.arange(-self.N / 2, self.N / 2, dtype=np.double) * self._dk
-            self._kr = np.sqrt(self._k ** 2 + self._k[:, np.newaxis] ** 2, dtype=np.single)
-            self._M = np.linalg.pinv(self._get_band_construction_matrix())
-        
-        if len(img) > self._nsteps:
-            imgs = np.zeros((self._nsteps, self.N, self.N), dtype=np.single)
-            for i in range(self._nsteps):
-                imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0,
-                                       dtype=np.single)
-        else:
-            imgs = np.single(img)
-        sum_prepared_comp = torch.einsum('ij,jkl->ikl',
-                                         torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
-                                         torch.as_tensor(imgs, dtype=torch.complex64, device=self.tdev)).cpu().numpy()
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        maskbpf = (self._kr > otf_exclude_min_radius) & (self._kr < otf_exclude_max_radius)
-
-        motf = fft.fftshift(maskbpf / (self._tfm(self._kr, maskbpf) + (1 - maskbpf) * 0.0001))
-
-        band0_common = fft.ifft2(fft.fft2(sum_prepared_comp[0, :, :]) * motf)
-        band1_common = fft.ifft2(fft.fft2(np.conjugate(sum_prepared_comp[1:, :, :])) * motf)
-        ix = band0_common * band1_common
-
-        ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(ix))))
-        return ixf
 
     def WFreconstruct(self, img):
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
@@ -998,6 +962,7 @@ class BaseSimProcessor:
         ix = band0_common * band1_common
 
         ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(ix))))
+        #self.ixf = ixf
 
         # pyc0, pxc0 = self._findPeak((ixf - gaussian_filter(ixf, 20)) * mask)
         pyc0, pxc0 = self._findPeak(ixf * mask)
@@ -1182,7 +1147,7 @@ class BaseSimProcessor:
         ix = band0_common * band1_common
 
         ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(ix))))
-
+        # self.ixf = ixf.cpu().numpy()
         pyc0, pxc0 = self._findPeak_pytorch(ixf * mask)
         kx = (self._dk * (pxc0 - self.N / 2)).cpu().numpy()
         ky = (self._dk * (pyc0 - self.N / 2)).cpu().numpy()

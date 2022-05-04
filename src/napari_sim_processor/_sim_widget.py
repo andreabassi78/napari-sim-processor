@@ -14,7 +14,7 @@ from napari.layers import Image
 import numpy as np
 from napari.qt.threading import thread_worker
 from magicgui.widgets import FunctionGui
-from magicgui import magicgui,magic_factory
+from magicgui import magicgui, magic_factory
 import warnings
 
 
@@ -122,16 +122,19 @@ class SimAnalysis(QWidget):
             #_layout.addWidget(QLabel(_title))
             
         # initialize layout
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()
         self.setLayout(layout)
+        top_layout = QVBoxLayout()
+        bottom_layout = QHBoxLayout()
+        layout.addLayout(top_layout)
+        layout.addLayout(bottom_layout)
         left_layout = QVBoxLayout()
-        add_section(left_layout)
-        layout.addLayout(left_layout)
+        bottom_layout.addLayout(left_layout)
         right_layout = QVBoxLayout()
-        add_section(right_layout)
-        layout.addLayout(right_layout)
-        # Fill left layout
-        self.add_magic_layer_selection(left_layout)
+        bottom_layout.addLayout(right_layout)
+        # Fill top layout
+        self.add_magic_layer_selection(top_layout)
+        # Fill bottom-left layout
         self.phases_number = Setting('phases', dtype=int, initial=7, layout=left_layout, 
                               write_function = self.reset_processor)
         self.angles_number = Setting('angles', dtype=int, initial=1, layout=left_layout, 
@@ -170,7 +173,7 @@ class SimAnalysis(QWidget):
         self.find_carrier = Setting('find carrier', dtype=bool, initial=True,
                                      layout=left_layout, 
                                      write_function = self.setReconstructor) 
-        # Fill right layout    
+        # Fill bottom-right layout    
         self.showXcorr = Setting('Show Xcorr', dtype=bool, initial=False,
                                      layout=right_layout,
                                      write_function = self.show_xcorr
@@ -194,9 +197,9 @@ class SimAnalysis(QWidget):
         self.keep_calibrating = Setting('Continuos Calibration', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
-        self.keep_reconstructing = Setting('Continuos Reconstruction', dtype=bool, initial=False,
-                                     layout=right_layout, 
-                                     write_function = self.setReconstructor)
+        # self.keep_reconstructing = Setting('Continuos Reconstruction', dtype=bool, initial=False,
+        #                              layout=right_layout, 
+        #                              write_function = self.setReconstructor)
         self.batch = Setting('Batch Reconstruction', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
@@ -255,7 +258,7 @@ class SimAnalysis(QWidget):
         self.showEta.val = False
         self.showCarrier.val = False
         self.keep_calibrating.val = False
-        self.keep_reconstructing.val = False
+        #self.keep_reconstructing.val = False
         print(f'Selected image layer: {image.name}')
         
             
@@ -285,10 +288,10 @@ class SimAnalysis(QWidget):
            
             
     def on_step_change(self, *args):   
-        if hasattr(self, 'imageRaw_name'): #self.viewer.dims.ndim >3:
+        if hasattr(self, 'imageRaw_name'): 
             self.setReconstructor()
-            if self.showSpectrum.val:
-                 self.show_spectrum()
+            self.show_spectrum()
+            self.show_xcorr()
             
                  
     def show_image(self, image_values, im_name, **kwargs):
@@ -362,7 +365,7 @@ class SimAnalysis(QWidget):
     
     def get_hyperstack(self):
         '''
-        Returns the full 5D raw image stack
+        Returns the full 5D (angles,phases,z,y,x) raw image stack
         '''
         try:
             return self.viewer.layers[self.imageRaw_name].data
@@ -370,9 +373,9 @@ class SimAnalysis(QWidget):
              raise(KeyError('Please select a valid stack'))
     
     
-    def get_current_stack(self):
+    def get_current_ap_stack(self):
         '''
-        Returns the raw image stack at the z value selected in the viewer  
+        Returns the 4D raw image (angles,phases,y,x) stack at the z value selected in the viewer  
         '''
         fullstack = self.get_hyperstack()
         z_index = int(self.viewer.dims.current_step[2])
@@ -381,10 +384,23 @@ class SimAnalysis(QWidget):
         stack = fullstack[:,:,z_index,:,:]
         return stack
     
+    def get_current_p_stack(self):
+        '''
+        Returns the 4D raw image (angles,phases,y,x) stack at the z value selected in the viewer  
+        '''
+        fullstack = self.get_hyperstack()
+        angle_index = int(self.viewer.dims.current_step[0])        
+        z_index = int(self.viewer.dims.current_step[2])
+        s = fullstack.shape
+        assert z_index < s[2], 'Please choose a valid z step for the selected stack'
+        assert angle_index < s[0], 'Please choose a valid z step for the selected stack'
+        stack = fullstack[angle_index,:,z_index,:,:]
+        return np.squeeze(stack)
+        
     
     def get_current_image(self):
         '''
-        Returns the raw image stack at the z, angle and phase values selected in the viewer  
+        Returns the 2D raw image stack at the z, angle and phase values selected in the viewer  
         '''
         hs = self.get_hyperstack()
         z_index = int(self.viewer.dims.current_step[2])
@@ -454,8 +470,8 @@ class SimAnalysis(QWidget):
                 self.h.ky = self.ky_input
             if self.keep_calibrating.val:
                 self.calibration()
-            if self.keep_reconstructing.val:
-                self.single_plane_reconstruction()
+            # if self.keep_reconstructing.val:
+            #     self.single_plane_reconstruction()
             if self.showEta.val:
                 self.show_eta()
           
@@ -503,8 +519,9 @@ class SimAnalysis(QWidget):
         """
         if self.is_image_in_layers():
             imname = 'Xcorr_' + self.imageRaw_name
-            if self.showXcorr.val and self.isCalibrated:
-                ixf = self.h.ixf
+            if self.showXcorr.val:
+                img = self.get_current_p_stack()
+                ixf = np.squeeze(self.h.crossCorrelations(img))
                 self.show_image(ixf, imname, hold = True,
                                 colormap ='twilight', autoscale = True)
                 self.show_carrier()
@@ -702,7 +719,7 @@ class SimAnalysis(QWidget):
         Performs SIM reconstruction on the selected z plane.
         '''
         assert self.isCalibrated, 'SIM processor not calibrated, unable to perform SIM reconstruction'
-        current_image = self.get_current_stack()
+        current_image = self.get_current_ap_stack()
         dshape= current_image.shape
         phases_angles = self.phases_number.val*self.angles_number.val
         rdata = current_image.reshape(phases_angles, dshape[-2],dshape[-1])
@@ -786,7 +803,7 @@ class SimAnalysis(QWidget):
         phaseshift = np.zeros((7,3))
         expected_phase = np.zeros((7,3))
         error = np.zeros((7,3))
-        stack = self.get_current_stack()
+        stack = self.get_current_ap_stack()
         sa,sp,sy,sx = stack.shape
         img = stack.reshape(sa*sp, sy, sx) 
         for i in range (3):
@@ -802,7 +819,7 @@ class SimAnalysis(QWidget):
             
     
     def find_sim_phaseshifts(self):   
-        stack = self.get_current_stack()
+        stack = self.get_current_ap_stack()
         sa,sp,sy,sx = stack.shape
         img = stack.reshape(sa*sp, sy, sx)  
         for angle_idx in range (sa):
@@ -867,10 +884,9 @@ if __name__ == '__main__':
     widget = SimAnalysis(viewer)
     
     my_reshape_widget = reshape()    
-    
+    viewer.window.add_dock_widget(my_reshape_widget, name = 'Reshape stack', add_vertical_stretch = True)
     viewer.window.add_dock_widget(widget,
                                   name = 'HexSim analyzer @Polimi',
                                   add_vertical_stretch = True)
-    viewer.window.add_dock_widget(my_reshape_widget, name = 'Reshape stack', add_vertical_stretch = True)
     
     napari.run()      
