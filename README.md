@@ -75,7 +75,7 @@ To install latest development version :
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture2.png)
 
 10) Run the reconstruction of a single plane (SIM reconstruction) or of a stack (Stack reconstruction). Click on the Batch reconstruction checkbox in order to process an entire stack in one shot. Click on the pytorch checkbox for gpu acceleration.
-![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture1.png)
+![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture3.png)
 
 ## Contributing
 
