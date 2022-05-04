@@ -1,9 +1,7 @@
 import numpy as np
 from numpy import pi
-try:
-    from baseSimProcessor import BaseSimProcessor
-except:
-    pass
+from ..baseSimProcessor import BaseSimProcessor
+
 class HexSimProcessor(BaseSimProcessor):
     '''
     Implements hexagonal SIM illumination with three beams, seven phase steps
