@@ -1,10 +1,9 @@
 import multiprocessing
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 import scipy.io
 from numpy import exp, pi, sqrt, log2, arccos
-from scipy.ndimage import gaussian_filter
 
 try:
     import torch
