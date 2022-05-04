@@ -3,10 +3,10 @@ display_name: napari SIM processor
 contributions:
   commands: 
     - id: napari-sim-processor.make_sim_widget
-      python_name: napari_sim_processor._widget:SimAnalysis
+      python_name: napari_sim_processor._sim_widget:SimAnalysis
       title: SIM processor
     - id: napari-sim-processor.make_reshape_widget
-      python_name: napari_sim_processor._widget:reshape
+      python_name: napari_sim_processor._sim_widget:reshape
       title: Reshape stack
   
   widgets:
