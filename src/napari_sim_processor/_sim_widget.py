@@ -519,8 +519,8 @@ class SimAnalysis(QWidget):
         if self.is_image_in_layers():
             imname = 'Xcorr_' + self.imageRaw_name
             if self.showXcorr.val:
-                img = self.get_current_p_stack()
-                ixf = np.squeeze(self.h.crossCorrelations(img))
+                ap_stack = np.squeeze(self.get_current_ap_stack())
+                ixf = np.squeeze(self.h.crossCorrelations(ap_stack))
                 self.show_image(ixf, imname, hold = True,
                                 colormap ='twilight', autoscale = True)
                 self.show_carrier()
