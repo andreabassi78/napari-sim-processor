@@ -69,11 +69,11 @@ To install latest development version :
 
 7) Choose the correct parameters of the SIM acquisition (`NA`, `pixelsize`, `M`, etc.) and processing parameters (`alpha`, `beta`, w, `eta`, `group`).
 
-    -`w`: parameter of the weiner filter.
+    - `w`: parameter of the weiner filter.
 	
-    -`eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units).
+    - `eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units).
 	 
-    -`group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
+    - `group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
 	
 For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
 
