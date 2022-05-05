@@ -60,8 +60,8 @@ To install latest development version :
 
 4) If your image is ordered as a 5D stack (angle, phase, z-frame, y, x) go to point 4. 
 
-5) In the reshape widget, select the actual number of acquired angles, phases, and frames and press `Reshape Stack`.
- Note that the label axis of the viewer will be updated (red arrow).
+5) In the reshape widget, select the actual number of acquired angles, phases, and frames (red arrow) and press `Reshape Stack`.
+ Note that the label axis of the viewer will be updated (green arrow).
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/raw/main/images/Picture1b.png)
 
