@@ -1,0 +1,9 @@
+napari-plugin-engine>=0.1.4
+numpy
+napari
+matplotlib
+scipy
+multiprocessing
+magicgui
+warnings
+qtpy
