@@ -3,7 +3,7 @@ import numpy as np
 import scipy
 import scipy.io
 from numpy import exp, pi, sqrt, log2, arccos
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 try:
     import torch
