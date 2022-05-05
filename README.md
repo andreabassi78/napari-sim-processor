@@ -64,22 +64,23 @@ To install latest development version :
 
 6) In the sim-reconstruction widget press the Select image layer button. Note that the number of phases and angles will be updated. 
 
-7) Choose the correct parameters of the SIM acquisition (NA, pixelsize, M, etc.) and processing parameters (alpha, beta, w, eta, group).
-	w: parameter of the weiner filter.
-	eta: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units). 
-	group: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
+7) Choose the correct parameters of the SIM acquisition (`NA`, `pixelsize`, `M`, etc.) and processing parameters (`alpha`, `beta`, w, `eta`, `group`).
+	`w`: parameter of the weiner filter.
+	`eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units). 
+	`group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
 	For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
 
-8) Calibrate the SIM processor, pressing the correspondent button. This will find the carrier frequencies (red circles if the Show Carrier checkbox is selected), the modulation amplitude and the phase, using cross correlation analysis.
+8) Calibrate the SIM processor, pressing the `Calibrate` button. This will find the carrier frequencies (red circles if the `Show Carrier` checkbox is selected), the modulation amplitude and the phase, using cross correlation analysis.
 
-9) Click on the checkboxes to show the power spectrum of the image or the cross-correlation, to see if the carrier frequency is found correctly
+9) Click on the checkboxes to show the power spectrum of the raw image (`Show power spectrum`) or the cross-correlation (`Show Xcorr`), to see if the found carrier frequency is correct.
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture2.png)
+** Napari viewer showing the cross-correlation of the raw stack. The pupil circle is in blue. A circle corresponding to `eta` is shown in green. The red circles indicate the found carrier frequencies**
 
-10) Run the reconstruction of a single plane (SIM reconstruction) or of a stack (Stack reconstruction). After execution, a new image_layer will be added to the napari viewer. Click on the Batch reconstruction checkbox in order to process an entire stack in one shot. Click on the pytorch checkbox for gpu acceleration.
+10) Run the reconstruction of a single plane (`SIM reconstruction`) or of a stack (`Stack reconstruction`). After execution, a new image_layer will be added to the napari viewer. Click on the `Batch reconstruction` checkbox in order to process an entire stack in one shot. Click on the pytorch checkbox for gpu acceleration.
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture3b.png)
-**Napari viewer with widgets showing a pseudo-widefield reconstruction**
+** Napari viewer with widgets showing a pseudo-widefield reconstruction**
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture3.png)
 **Napari viewer with widgets showing a SIM reconstruction**

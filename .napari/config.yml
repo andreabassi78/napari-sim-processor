@@ -3,8 +3,11 @@
 labels:
   ontology: EDAM-BIOIMAGING:alpha06
   terms:
-  - Resolution enhancement
+  - Structured illumination reconstruction
+  - Super-resolution microscopy
   - 3D image
   - Fluorescence microscopy
-  - Structured Illumination microscopy
+  - Spatial properties
   - Image processing
+  - Frequency-domain transformation
+  - Image convolution
