@@ -61,21 +61,21 @@ To install latest development version :
 4) If your image is ordered as a 5D stack (angle, phase, z-frame, y, x) go to point 4. 
 
 5) In the reshape widget, select the actual number of acquired angles, phases, and frames and press `Reshape Stack`.
- Note that the label axis of the viewer will be updated.
+ Note that the label axis of the viewer will be updated (red arrow).
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture1b.png)
 
-6) In the sim-reconstruction widget press the Select image layer button. Note that the number of phases and angles will be updated. 
+6) In the sim-reconstruction widget press the Select image layer button. Note that the number of phases and angles will be updated (blue arrow). 
 
 7) Choose the correct parameters of the SIM acquisition (`NA`, `pixelsize`, `M`, etc.) and processing parameters (`alpha`, `beta`, w, `eta`, `group`).
 
-        `w`: parameter of the weiner filter.
+`w`: parameter of the weiner filter.
 	
-    	`eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units).
+`eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units).
 	 
-    	`group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
+`group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
 	
-   For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
+For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
 
 8) Calibrate the SIM processor, pressing the `Calibrate` button. This will find the carrier frequencies (red circles if the `Show Carrier` checkbox is selected), the modulation amplitude and the phase, using cross correlation analysis.
 
