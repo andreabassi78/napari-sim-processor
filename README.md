@@ -75,12 +75,12 @@ To install latest development version :
 9) Click on the checkboxes to show the power spectrum of the raw image (`Show power spectrum`) or the cross-correlation (`Show Xcorr`), to see if the found carrier frequency is correct.
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture2.png)
-** Napari viewer showing the cross-correlation of the raw stack. The pupil circle is in blue. A circle corresponding to eta is shown in green. The red circles indicate the found carrier frequencies**
+**Napari viewer showing the cross-correlation of the raw stack. The pupil circle is in blue. A circle corresponding to eta is shown in green. The red circles indicate the found carrier frequencies**
 
 10) Run the reconstruction of a single plane (`SIM reconstruction`) or of a stack (`Stack reconstruction`). After execution, a new image_layer will be added to the napari viewer. Click on the `Batch reconstruction` checkbox in order to process an entire stack in one shot. Click on the pytorch checkbox for gpu acceleration.
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture3b.png)
-** Napari viewer with widgets showing a pseudo-widefield reconstruction**
+**Napari viewer with widgets showing a pseudo-widefield reconstruction**
 
 ![raw](https://github.com/andreabassi78/napari-sim-processor/blob/main/images/Picture3.png)
 **Napari viewer with widgets showing a SIM reconstruction**
