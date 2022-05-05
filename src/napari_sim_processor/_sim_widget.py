@@ -383,18 +383,23 @@ class SimAnalysis(QWidget):
         stack = fullstack[:,:,z_index,:,:]
         return stack
     
-    def get_current_p_stack(self):
+    def get_current_stack_for_calibration(self):
         '''
         Returns the 4D raw image (angles,phases,y,x) stack at the z value selected in the viewer  
         '''
-        fullstack = self.get_hyperstack()
-        angle_index = int(self.viewer.dims.current_step[0])        
-        z_index = int(self.viewer.dims.current_step[2])
-        s = fullstack.shape
-        assert z_index < s[2], 'Please choose a valid z step for the selected stack'
-        assert angle_index < s[0], 'Please choose a valid z step for the selected stack'
-        stack = fullstack[angle_index,:,z_index,:,:]
-        return np.squeeze(stack)
+        data = self.get_hyperstack()
+        dshape = data.shape
+        zidx = int(self.viewer.dims.current_step[2])
+        delta = self.group.val // 2
+        remainer = self.group.val % 2
+        zmin = max(zidx-delta,0)
+        zmax = min(zidx+delta+remainer,dshape[2])
+        new_delta = zmax-zmin
+        data = data[...,zmin:zmax,:,:]
+        phases_angles = self.phases_number.val*self.angles_number.val
+        rdata = data.reshape(phases_angles, new_delta, dshape[-2],dshape[-1])            
+        cal_stack = np.swapaxes(rdata, 0, 1).reshape((phases_angles * new_delta, dshape[-2],dshape[-1]))
+        return cal_stack
         
     
     def get_current_image(self):
@@ -518,9 +523,15 @@ class SimAnalysis(QWidget):
         """
         if self.is_image_in_layers():
             imname = 'Xcorr_' + self.imageRaw_name
-            if self.showXcorr.val:
-                ap_stack = np.squeeze(self.get_current_ap_stack())
-                ixf = np.squeeze(self.h.crossCorrelations(ap_stack))
+            if self.showXcorr.val and hasattr(self,'h'):
+                
+                im = self.get_current_stack_for_calibration()
+                ixf = np.squeeze(self.h.crossCorrelations(im))
+                if ixf.ndim >2:
+                    phase_index = int(self.viewer.dims.current_step[1])
+                    carrier_idx = phase_index % ixf.shape[0]
+                    # if multiple carriers are found, the phase index is used to show it
+                    ixf=ixf[carrier_idx,:,:]
                 self.show_image(ixf, imname, hold = True,
                                 colormap ='twilight', autoscale = True)
                 self.show_carrier()
@@ -685,22 +696,11 @@ class SimAnalysis(QWidget):
         *args is to avoid conflic with the add_timer decorator
         '''
         if hasattr(self, 'h'):
-            data = self.get_hyperstack()
-            dshape = data.shape
-            zidx = int(self.viewer.dims.current_step[2])
-            delta = self.group.val // 2
-            remainer = self.group.val % 2
-            zmin = max(zidx-delta,0)
-            zmax = min(zidx+delta+remainer,dshape[2])
-            new_delta = zmax-zmin
-            data = data[...,zmin:zmax,:,:]
-            phases_angles = self.phases_number.val*self.angles_number.val
-            rdata = data.reshape(phases_angles, new_delta, dshape[-2],dshape[-1])            
-            selected_imRaw = np.swapaxes(rdata, 0, 1).reshape((phases_angles * new_delta, dshape[-2],dshape[-1]))
+            imRaw = self.get_current_stack_for_calibration()         
             if self.use_torch.val:
-                self.h.calibrate_pytorch(selected_imRaw,self.find_carrier.val)
+                self.h.calibrate_pytorch(imRaw,self.find_carrier.val)
             else:
-                self.h.calibrate(selected_imRaw,self.find_carrier.val)
+                self.h.calibrate(imRaw,self.find_carrier.val)
             self.isCalibrated = True
             if self.find_carrier.val: # store the value found   
                 self.kx_input = self.h.kx  

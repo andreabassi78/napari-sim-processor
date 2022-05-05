@@ -1,7 +1,5 @@
-import matplotlib.pyplot as plt
 import numpy as np
 from numpy import pi
-
 from .baseSimProcessor import BaseSimProcessor
 
 class ConvSimProcessor(BaseSimProcessor):
@@ -49,4 +47,3 @@ class ConvSimProcessor(BaseSimProcessor):
             plt.title('Matrix')
             plt.imshow(np.abs(ret))
         return ret
-

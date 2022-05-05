@@ -7,19 +7,19 @@
 [![codecov](https://codecov.io/gh/andreabassi78/napari-sim-processor/branch/main/graph/badge.svg)](https://codecov.io/gh/andreabassi78/napari-sim-processor)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-sim-processor)](https://napari-hub.org/plugins/napari-sim-processor)
 
-A Napari plugin for the reconstruction of Structured Illumination microscopy (SIM) data with GPU acceleration (with pytorch, if installed).
+A Napari plugin for the reconstruction of Structured Illumination Microscopy (SIM) with GPU acceleration (with pytorch, if installed).
 Currently supports:    
-   - conventional SIM data with improved resolution in 1D (1 angle, 3 phases)
-   - conventional SIM data (3 angles, 3 phases)
-   - hexagonal SIM (7 phases).
+   - conventional SIM data for resolution improvement in 1D (1 angle, 3 phases)
+   - conventional SIM data for resolution improvement in 2D (3 angles, 3 phases)
+   - hexagonal SIM data for resolution improvement in 2D (7 phases).
 
-The SIM processing widget accepts image stacks organized in 5D (angle,phase,z,y,x).
-
-For raw image stacks with multiple z-frames each plane is processed as described in:
-	https://doi.org/10.1098/rsta.2020.0162
-    
+The SIM processing widget accepts image stacks organized in 5D (`angle`,`phase`,`z`,`y`,`x`).
 A reshape widget is availbale, to easily reshape the data if they are organized differently than 5D (angle,phase,z,y,x)
-    
+Currently only square images are supported (`x`=`y`)
+
+For raw image stacks with multiple z-frames each plane is processed as described here:
+	https://doi.org/10.1098/rsta.2020.0162
+        
 Support for N angles, M phases is in progress.
 Support for 3D SIM with enhanced resolution in all directions is not yet available.
 Multicolor reconstruction is not yet available.  
@@ -65,14 +65,14 @@ To install latest development version :
 6) In the sim-reconstruction widget press the Select image layer button. Note that the number of phases and angles will be updated. 
 
 7) Choose the correct parameters of the SIM acquisition (`NA`, `pixelsize`, `M`, etc.) and processing parameters (`alpha`, `beta`, w, `eta`, `group`).
+
+        `w`: parameter of the weiner filter.
 	
-	`w`: parameter of the weiner filter.
-	
-	`eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units).
+    	`eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units).
 	 
-	`group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
+    	`group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
 	
-	For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
+   For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
 
 8) Calibrate the SIM processor, pressing the `Calibrate` button. This will find the carrier frequencies (red circles if the `Show Carrier` checkbox is selected), the modulation amplitude and the phase, using cross correlation analysis.
 

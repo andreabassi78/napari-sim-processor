@@ -1,5 +1,7 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from numpy import pi
+
 from .baseSimProcessor import BaseSimProcessor
 
 class HexSimProcessor(BaseSimProcessor):
@@ -37,3 +39,4 @@ class HexSimProcessor(BaseSimProcessor):
             print(np.linalg.cond(M), np.linalg.cond(M, 'fro'), np.linalg.cond(M, np.inf), np.linalg.cond(M, -np.inf),
                   np.linalg.cond(M, 1), np.linalg.cond(M, -1), np.linalg.cond(M, 2), np.linalg.cond(M, -2))
         return M
+

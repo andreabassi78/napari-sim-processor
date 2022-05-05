@@ -1,10 +1,9 @@
-import multiprocessing
-import matplotlib.pyplot as plt
+import multiprocessing 
 import numpy as np
 import scipy
 import scipy.io
 from numpy import exp, pi, sqrt, log2, arccos
-from scipy.ndimage import gaussian_filter
+# from matplotlib import pyplot as plt
 
 try:
     import torch
@@ -383,25 +382,26 @@ class BaseSimProcessor:
 
     def crossCorrelations(self, img):
         '''Sum input images if there are more than self._nsteps'''
-        N = len(img[0, :, :])
-
-        # Recalculate arrays by default to account for changes to parameters
-        self._dx = self.pixelsize / self.magnification  # Sampling in image plane
-        self._res = self.wavelength / (2 * self.NA)
-        self._oversampling = self._res / self._dx
-        self._dk = self._oversampling / (N / 2)  # Sampling in frequency plane
-        self._k = np.arange(-N / 2, N / 2, dtype=np.double) * self._dk
-        self._kr = np.sqrt(self._k ** 2 + self._k[:, np.newaxis] ** 2, dtype=np.single)
-        self._M = np.linalg.pinv(self._get_band_construction_matrix())
-
+        self.N = img.shape[-1]
+        if self._M is None:
+            self._dx = self.pixelsize / self.magnification  # Sampling in image plane
+            self._res = self.wavelength / (2 * self.NA)
+            self._oversampling = self._res / self._dx
+            self._dk = self._oversampling / (self.N / 2)  # Sampling in frequency plane
+            self._k = np.arange(-self.N / 2, self.N / 2, dtype=np.double) * self._dk
+            self._kr = np.sqrt(self._k ** 2 + self._k[:, np.newaxis] ** 2, dtype=np.single)
+            self._M = np.linalg.pinv(self._get_band_construction_matrix())
+        
         if len(img) > self._nsteps:
-            imgs = np.zeros((self._nsteps, N, N), dtype=np.single)
+            imgs = np.zeros((self._nsteps, self.N, self.N), dtype=np.single)
             for i in range(self._nsteps):
                 imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0,
                                        dtype=np.single)
         else:
             imgs = np.single(img)
-        sum_prepared_comp = np.dot(self._M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
+        sum_prepared_comp = torch.einsum('ij,jkl->ikl',
+                                         torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
+                                         torch.as_tensor(imgs, dtype=torch.complex64, device=self.tdev)).cpu().numpy()
         otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (self._kr > otf_exclude_min_radius) & (self._kr < otf_exclude_max_radius)
