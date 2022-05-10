@@ -40,7 +40,7 @@ def reshape_init(reshape_widget: FunctionGui):
                call_button="Reshape stack",
                x={'max': 4096},
                y={'max': 4096},
-               input_order={"choices": ['apzyx', 'pazyx', 'pzayx', 'azpyx']},
+               input_order={"choices": ['apzyx', 'pazyx', 'pzayx', 'azpyx', 'zapyx', 'zpayx']},
                )
 def reshape(viewer: napari.Viewer,
             input_image: Image,
@@ -84,7 +84,11 @@ def reshape(viewer: napari.Viewer,
         elif input_order == 'pzayx':
             rdata = np.moveaxis(data.reshape(phases, z, angles, y, x),[0,1,2],[1,2,0])
         elif input_order == 'azpyx':
-            rdata = np.moveaxis(data.reshape(angles, z, phases, y, x),[1,2],[2,1])
+            rdata = np.moveaxis(data.reshape(angles, z, phases, y, x), [1, 2], [2, 1])
+        elif input_order == 'zapyx':
+            rdata = np.moveaxis(data.reshape(z, angles, phases, y, x), [0, 1, 2], [2, 0, 1])
+        elif input_order == 'zpayx':
+            rdata = np.moveaxis(data.reshape(z, phases, angles, y, x), [0, 2], [2, 0])
         else:
             raise(ValueError('Input stack order reshaping not implemented'))
         input_image.data = rdata
@@ -158,7 +162,7 @@ class SimAnalysis(QWidget):
         self.beta = Setting('beta', dtype=float, initial=0.980, spinbox_step=0.01, 
                              layout=left_layout,  spinbox_decimals=3,
                              write_function = self.setReconstructor)
-        self.w = Setting('w', dtype=float, initial=0.5, layout=left_layout,
+        self.w = Setting('w', dtype=float, initial=0.2, layout=left_layout,
                               spinbox_decimals=2,
                               write_function = self.setReconstructor)
         self.eta = Setting('eta', dtype=float, initial=0.65,
@@ -369,7 +373,7 @@ class SimAnalysis(QWidget):
         try:
             return self.viewer.layers[self.imageRaw_name].data
         except:
-             raise(KeyError('Please select a valid stack'))
+            raise(KeyError('Please select a valid stack'))
     
     
     def get_current_ap_stack(self):
@@ -601,7 +605,6 @@ class SimAnalysis(QWidget):
     def add_circles(self, locations, radius=20,
                     shape_name='shapename', color='blue', hold=False
                     ):
-        
         '''
         Creates a circle in a layer with yx coordinates speciefied in each row of locations
         
@@ -663,13 +666,12 @@ class SimAnalysis(QWidget):
         sa,sp,sz,sy,sx = fullstack.shape
         phases_angles = sa*sp
         pa_stack = fullstack.reshape(phases_angles, sz, sy, sx)
-        demodulated = np.zeros([sz,sy,sx]).astype('float')
-        # if self.use_torch.val: TODO implement demodulation in torch, add to function call.astype(np.float32)
-        #     demodulation_function = self.h.OSreconstruct_pytorch
-        demodulation_function = self.h.filteredOSreconstruct
-        for frame_index in range(sz):
-            stack = np.squeeze(pa_stack[:,frame_index,:,:])
-            demodulated[frame_index,:,:] = np.squeeze(demodulation_function(stack))
+        paz_stack = np.swapaxes(pa_stack, 0, 1).reshape((phases_angles*sz, sy, sx))
+        if self.use_torch.val: # implemented demodulation in torch, conversion to float32 internal to function call
+            demodulation_function = self.h.filteredOSreconstruct_pytorch
+        else:
+            demodulation_function = self.h.filteredOSreconstruct
+        demodulated = np.squeeze(demodulation_function(paz_stack))
         imname = 'Demodulated_' + self.imageRaw_name
         scale = [self.zscaling,1,1]
         self.show_image(demodulated, imname, scale=scale, hold=True, autoscale=True)
@@ -808,7 +810,7 @@ class SimAnalysis(QWidget):
         for i in range (3):
             phase, _ = self.h.find_phase(self.h.kx[i], self.h.ky[i], img)
             expected_phase[:,i] = np.arange(7) * 2*(i+1) * np.pi / 7
-            phaseshift[:,i] = np.unwrap(phase - phase[0])
+            phaseshift[:,i] = np.unwrap(phase - phase[0] - expected_phase[:,i]) + expected_phase[:,i]
         error = phaseshift-expected_phase
         data_to_plot = [expected_phase, phaseshift, error]
         symbols = ['.','o','|']
