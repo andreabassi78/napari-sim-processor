@@ -831,7 +831,7 @@ class SimAnalysis(QWidget):
             expected_phase[:,angle_idx] = np.arange(sp) * 2*np.pi / sp
             phaseshift= phase-phase[0,:]
             error = phaseshift-expected_phase      
-            data_to_plot = [expected_phase, phaseshift, error]
+            data_to_plot = [expected_phase[:,angle_idx], phaseshift[:,angle_idx], error[:,angle_idx]]
             symbols = ['.','o','|']
             legend = ['expected', 'measured', 'error']
             self.plot_with_plt(data_to_plot, legend, symbols, title = f'angle {angle_idx}',
@@ -885,7 +885,7 @@ if __name__ == '__main__':
     my_reshape_widget = reshape()    
     viewer.window.add_dock_widget(my_reshape_widget, name = 'Reshape stack', add_vertical_stretch = True)
     viewer.window.add_dock_widget(widget,
-                                  name = 'HexSim analyzer @Polimi',
+                                  name = 'Sim analyzer @Polimi',
                                   add_vertical_stretch = True)
     
     napari.run() 
