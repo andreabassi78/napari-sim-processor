@@ -5,7 +5,7 @@ Created on Tue Jan 25 16:34:41 2022
 @author: Andrea Bassi @ Polimi
 """
 from qtpy.QtWidgets import QLabel, QFormLayout, QSpinBox, QDoubleSpinBox, QCheckBox
-
+from qtpy.QtCore import Qt
 class Setting():
     '''
     Auxiliary class to create an numerical or boolean attribute 
@@ -113,6 +113,7 @@ class Setting():
         if self.write_function is not None:
             change_func.connect(self.write_function)
         settingLayout = QFormLayout()
+        settingLayout.setFormAlignment(Qt.AlignLeft)
         lab = QLabel(name)
         lab.setWordWrap(False)
         settingLayout.addRow(sbox,lab)

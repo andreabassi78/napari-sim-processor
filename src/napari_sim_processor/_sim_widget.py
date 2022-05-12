@@ -200,9 +200,6 @@ class SimAnalysis(QWidget):
         self.keep_calibrating = Setting('Continuos Calibration', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
-        # self.keep_reconstructing = Setting('Continuos Reconstruction', dtype=bool, initial=False,
-        #                              layout=right_layout, 
-        #                              write_function = self.setReconstructor)
         self.batch = Setting('Batch Reconstruction', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
@@ -291,10 +288,11 @@ class SimAnalysis(QWidget):
            
             
     def on_step_change(self, *args):   
-        if hasattr(self, 'imageRaw_name'): 
+        if hasattr(self, 'imageRaw_name'):
             self.setReconstructor()
             self.show_spectrum()
             self.show_xcorr()
+            
             
                  
     def show_image(self, image_values, im_name, **kwargs):

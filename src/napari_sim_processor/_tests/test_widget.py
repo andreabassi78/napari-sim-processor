@@ -11,5 +11,5 @@ def test_reshape_widget(make_napari_viewer, capsys):
     viewer.add_image(np.random.random((3,6,100, 100)))
     reshape_widget = reshape()
     reshape_widget(viewer, viewer.layers[0],'apzyx',3,3,2,100,100)
-    captured = capsys.readouterr()
-    assert viewer.layers[0].data.shape[0] == 3
+    # captured = capsys.readouterr()
+    assert viewer.layers[0].data.shape[2] == 2
