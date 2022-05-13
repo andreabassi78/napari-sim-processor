@@ -9,7 +9,7 @@ from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
 from napari_sim_processor.simProcessor import SimProcessor 
 import napari
-from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton, QComboBox
+from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton, QComboBox, QLineEdit
 from napari.layers import Image
 import numpy as np
 from napari.qt.threading import thread_worker
@@ -17,6 +17,7 @@ from magicgui.widgets import FunctionGui
 from magicgui import magicgui, magic_factory
 import warnings
 import enum
+import time
 
 class accel(enum.Enum):
     USENUMPY = 1
@@ -229,8 +230,11 @@ class SimAnalysis(QWidget):
         for button_name, call_function in buttons_dict.items():
             button = QPushButton(button_name)
             button.clicked.connect(call_function)
-            right_layout.addWidget(button) 
-    
+            right_layout.addWidget(button)
+
+        self.messageBox = QLineEdit()
+        layout.addWidget(self.messageBox, stretch=True)
+        self.messageBox.setText('Messages')
         
     def add_magic_layer_selection(self,_layout):
         function = self.select_layer
@@ -716,13 +720,16 @@ class SimAnalysis(QWidget):
         *args is to avoid conflic with the add_timer decorator
         '''
         if hasattr(self, 'h'):
-            imRaw = self.get_current_stack_for_calibration()         
+            imRaw = self.get_current_stack_for_calibration()
+            start_time = time.time()
             if self.proc.currentData() == accel.USETORCH:
                 self.h.calibrate_pytorch(imRaw,self.find_carrier.val)
             if self.proc.currentData() == accel.USECUPY:
                 self.h.calibrate_cupy(imRaw, self.find_carrier.val)
             else:
                 self.h.calibrate(imRaw,self.find_carrier.val)
+            elapsed_time = time.time() - start_time
+            self.messageBox.setText(f'Calibration time {elapsed_time:.3f}s')
             self.isCalibrated = True
             if self.find_carrier.val: # store the value found   
                 self.kx_input = self.h.kx  
@@ -799,12 +806,15 @@ class SimAnalysis(QWidget):
         @thread_worker(connect={'returned': update_sim_image})
         def _batch_reconstruction():
             warnings.filterwarnings('ignore')
+            start_time = time.time()
             if self.proc.currentData() == accel.USETORCH:
                 stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize = 32)
             elif self.proc.currentData() == accel.USECUPY:
                 stackSIM = self.h.batchreconstructcompact_cupy(paz_stack, blocksize=32)
             else:
                 stackSIM = self.h.batchreconstructcompact(paz_stack)
+            elapsed_time = time.time() - start_time
+            self.messageBox.setText(f'Batch reconstruction time {elapsed_time:.3f}s')
             return stackSIM
         
         # main function exetuted here

@@ -1,6 +1,6 @@
 import multiprocessing
 import numpy as np
-import scipy
+import scipy.ndimage
 import scipy.io
 from numpy import exp, pi, sqrt, log2, arccos
 import matplotlib.pyplot as plt
