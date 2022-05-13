@@ -205,7 +205,7 @@ class BaseSimProcessor:
         if self.usePhases:
             phi = np.zeros((self._nbands, self._nsteps), dtype=np.single)
             for i in range(self._nbands):
-                phi[i, :], _ = self.find_phase(self.kx[i], self.ky[i], img)
+                phi[i, :], _ = self.find_phase(self.kx[i], self.ky[i], img, useCupy=useCupy, useTorch=useTorch)
             if self.debug:
                 print(phi)
                 print(phi.shape)
@@ -350,13 +350,13 @@ class BaseSimProcessor:
             krbig_pt = torch.as_tensor(krbig, device=self.tdev)
             kmax_pt = torch.as_tensor(kmax, device=self.tdev)
             wienerfilter_pt = torch.as_tensor(wienerfilter, device=self.tdev)
-            wienerfilter = (mtot_pt * self._tf_pytorch(1.99 * krbig_pt * mtot_pt / kmax_pt, a_type='none') / \
+            wienerfilter = (mtot_pt * self._tf_pytorch(1.99 * krbig_pt * mtot_pt / kmax_pt, a_type='none') /
                            (wienerfilter_pt * mtot_pt + self.w ** 2)).cpu().numpy()
         elif useCupy:
             mtot_cp = cp.asarray(mtot)
             wienerfilter = (mtot_cp * self._tf_cupy(1.99 * cp.asarray(krbig) * mtot_cp / cp.asarray(kmax),
-                                                        a_type='none') / \
-                                (cp.asarray(wienerfilter) * mtot_cp + self.w ** 2)).get()
+                                                    a_type='none') /
+                            (cp.asarray(wienerfilter) * mtot_cp + self.w ** 2)).get()
         else:
             wienerfilter = mtot * self._tf(1.99 * krbig * mtot / kmax, a_type = 'none') / \
                            (wienerfilter * mtot + self.w ** 2)
@@ -381,17 +381,17 @@ class BaseSimProcessor:
             self._postfilter_torch = torch.as_tensor(self._postfilter, device=self.tdev)
 
     def crossCorrelations(self, img):
-        '''Sum input images if there are more than self._nsteps'''
+        '''Calculate cross-correlations to revieal carrier, sum input images if there are more than self._nsteps'''
         N = len(img[0, :, :])
 
         # Recalculate arrays by default to account for changes to parameters
-        self._dx = self.pixelsize / self.magnification  # Sampling in image plane
-        self._res = self.wavelength / (2 * self.NA)
-        self._oversampling = self._res / self._dx
-        self._dk = self._oversampling / (N / 2)  # Sampling in frequency plane
-        self._k = np.arange(-N / 2, N / 2, dtype=np.double) * self._dk
-        self._kr = np.sqrt(self._k ** 2 + self._k[:, np.newaxis] ** 2, dtype=np.single)
-        self._M = np.linalg.pinv(self._get_band_construction_matrix())
+        dx = self.pixelsize / self.magnification  # Sampling in image plane
+        res = self.wavelength / (2 * self.NA)
+        oversampling = res / dx
+        dk = oversampling / (N / 2)  # Sampling in frequency plane
+        k = np.arange(-N / 2, N / 2, dtype=np.double) * dk
+        kr = np.sqrt(k ** 2 + k[:, np.newaxis] ** 2, dtype=np.single)
+        M = np.linalg.pinv(self._get_band_construction_matrix())
 
         if len(img) > self._nsteps:
             imgs = np.zeros((self._nsteps, N, N), dtype=np.single)
@@ -400,18 +400,90 @@ class BaseSimProcessor:
                                        dtype=np.single)
         else:
             imgs = np.single(img)
-        sum_prepared_comp = np.dot(self._M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
+        sum_prepared_comp = np.dot(M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
         otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        maskbpf = (self._kr > otf_exclude_min_radius) & (self._kr < otf_exclude_max_radius)
+        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
-        motf = fft.fftshift(maskbpf / (self._tfm(self._kr, maskbpf) + (1 - maskbpf) * 0.0001))
+        motf = fft.fftshift(maskbpf / (self._tfm(kr, maskbpf) + (1 - maskbpf) * 0.0001))
 
         band0_common = fft.ifft2(fft.fft2(sum_prepared_comp[0, :, :]) * motf)
         band1_common = fft.ifft2(fft.fft2(np.conjugate(sum_prepared_comp[1:, :, :])) * motf)
         ix = band0_common * band1_common
 
         ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(ix))))
+        return ixf
+
+    def crossCorrelations_cupy(self, img):
+        '''Calculate cross-correlations to revieal carrier, sum input images if there are more than self._nsteps'''
+        assert cupy, "No CuPy present"
+        N = len(img[0, :, :])
+
+        # Recalculate arrays by default to account for changes to parameters
+        dx = self.pixelsize / self.magnification  # Sampling in image plane
+        res = self.wavelength / (2 * self.NA)
+        oversampling = res / dx
+        dk = oversampling / (N / 2)  # Sampling in frequency plane
+        k = cp.arange(-N / 2, N / 2, dtype=cp.double) * dk
+        kr = cp.sqrt(k ** 2 + k[:, cp.newaxis] ** 2, dtype=cp.single)
+        M = cp.linalg.pinv(cp.asarray(self._get_band_construction_matrix()))
+
+        if len(img) > self._nsteps:
+            imgs = cp.zeros((self._nsteps, N, N), dtype=np.single)
+            imgt = cp.asarray(img, dtype=cp.single)
+            for i in range(self._nsteps):
+                imgs[i, :, :] = cp.sum(imgt[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0,
+                                       dtype=cp.single)
+        else:
+            imgs = cp.asarray(img, dtype=cp.single)
+        sum_prepared_comp = cp.dot(M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
+
+        motf = fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
+
+        band0_common = cp.fft.ifft2(cp.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
+        band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[1:, :, :])) * motf)
+        ix = band0_common * band1_common
+
+        ixf = cp.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ix)))).get()
+        return ixf
+
+    def crossCorrelations_pytorch(self, img):
+        '''Calculate cross-correlations to revieal carrier, sum input images if there are more than self._nsteps'''
+        assert pytorch, "No pytorch present"
+
+        N = len(img[0, :, :])
+
+        # Recalculate arrays by default to account for changes to parameters
+        dx = self.pixelsize / self.magnification  # Sampling in image plane
+        res = self.wavelength / (2 * self.NA)
+        oversampling = res / dx
+        dk = oversampling / (N / 2)  # Sampling in frequency plane
+        k = torch.arange(-N / 2, N / 2, dtype=torch.float32, device=self.tdev) * dk
+        kr = torch.sqrt(k ** 2 + k[:, np.newaxis] ** 2)
+        M = torch.linalg.pinv(torch.as_tensor(self._get_band_construction_matrix(), dtype=torch.complex64, device=self.tdev))
+
+        if len(img) > self._nsteps:
+            imgs = torch.zeros((self._nsteps, N, N), dtype=torch.float32, device=self.tdev)
+            imgt = torch.as_tensor(np.float32(img), device=self.tdev)
+            for i in range(self._nsteps):
+                imgs[i, :, :] = torch.sum(imgt[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0)
+        else:
+            imgs = torch.as_tensor(np.float32(img), device=self.tdev)
+        sum_prepared_comp = torch.einsum('ij,jkl->ikl',M[:self._nbands + 1, :], imgs + 0 * 1j)
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
+
+        motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
+
+        band0_common = torch.fft.ifft2(torch.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
+        band1_common = torch.fft.ifft2(torch.fft.fft2(torch.conj(sum_prepared_comp[1:, :, :])) * motf)
+        ix = band0_common * band1_common
+
+        ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(ix)))).cpu().numpy()
         return ixf
 
     def WFreconstruct(self, img):
@@ -427,11 +499,13 @@ class BaseSimProcessor:
         return filtered_wf_comp.real
 
     def WFreconstruct_cupy(self, img):
+        assert cupy, "No CuPy present"
         imgr = cp.asarray(img).reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         wf_comp = cp.einsum('j,kjlm->klm', cp.asarray(self._M[0, :].real), imgr).squeeze()
         return wf_comp.get()
 
     def filteredWFreconstruct_cupy(self, img):
+        assert cupy, "No CuPy present"
         imgr = cp.asarray(img).reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         wf_comp = cp.einsum('j,kjlm->klm', cp.asarray(self._M[0, :].real), imgr).squeeze()
         filt = cp.fft.fftshift(cp.asarray(self._attm(self._kr, self._kr < 2)))
@@ -439,6 +513,7 @@ class BaseSimProcessor:
         return filtered_wf_comp.real.get()
 
     def WFreconstruct_pytorch(self, img):
+        assert pytorch, "No pytorch present"
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         wf_comp = torch.einsum('j,kjlm->klm',
                                          torch.as_tensor(self._M[0, :], device=self.tdev),
@@ -447,6 +522,7 @@ class BaseSimProcessor:
         return wf_comp.cpu().real.numpy()
 
     def filteredWFreconstruct_pytorch(self, img):
+        assert pytorch, "No pytorch present"
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         wf_comp = torch.einsum('j,kjlm->klm',
                                          torch.as_tensor(self._M[0, :], device=self.tdev),
@@ -471,12 +547,14 @@ class BaseSimProcessor:
         return imgos
 
     def OSreconstruct_cupy(self, img):
+        assert cupy, "No CuPy present"
         imgr = cp.asarray(img).reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         sum_prepared_comp = cp.einsum('ij,kjlm->iklm', cp.asarray(self._M[1:self._nbands + 1, :]), imgr)
         imgos = cp.einsum('iklm,ij->klmj', cp.abs(sum_prepared_comp), cp.asarray(1 / self.ampl)).squeeze()
         return imgos.get()
 
     def filteredOSreconstruct_cupy(self, img):
+        assert cupy, "No CuPy present"
         imgr = cp.asarray(img).reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         sum_prepared_comp = cp.einsum('ij,kjlm->iklm', cp.asarray(self._M[1:self._nbands + 1, :]), imgr)
         filt = cp.fft.fftshift(cp.asarray(self._attm(self._kr, self._kr < 2)))
@@ -485,6 +563,7 @@ class BaseSimProcessor:
         return imgos.get()
 
     def OSreconstruct_pytorch(self, img):
+        assert pytorch, "No pytorch present"
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         sum_prepared_comp = torch.einsum('ij,kjlm->iklm',
                                          torch.as_tensor(self._M[1:self._nbands + 1, :], device=self.tdev),
@@ -494,6 +573,7 @@ class BaseSimProcessor:
         return imgos.cpu().numpy()
 
     def filteredOSreconstruct_pytorch(self, img):
+        assert pytorch, "No pytorch present"
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         sum_prepared_comp = torch.einsum('ij,kjlm->iklm',
                                          torch.as_tensor(self._M[1:self._nbands + 1, :], device=self.tdev),
@@ -693,7 +773,7 @@ class BaseSimProcessor:
         res = fft.irfft2(fft.rfft2(img3) * self._postfilter[:, :self.N + 1])
         return res
 
-    def batchreconstructcompact(self, img, blocksize = 128):
+    def batchreconstructcompact(self, img, blocksize=128):
         nim = img.shape[0]
         r = np.mod(nim, 2 * self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by 14
@@ -766,9 +846,9 @@ class BaseSimProcessor:
         # cp._default_memory_pool.free_all_blocks()
         return res
 
-    def batchreconstructcompact_cupy(self, img):
+    def batchreconstructcompact_cupy(self, img, blocksize=128):
         assert cupy, "No CuPy present"
-        cp._default_memory_pool.free_all_blocks()
+        self.empty_cache()
         img = cp.array(img, dtype=np.float32)
         nim = img.shape[0]
         r = np.mod(nim, 2 * self._nsteps)
@@ -795,7 +875,6 @@ class BaseSimProcessor:
         # cp._default_memory_pool.free_all_blocks()
 
         img3 = cp.zeros((nimg, 2 * self.N, 2 * self.N), dtype=np.single)
-        blocksize = 128
         for offs in range(0, 2*self.N - blocksize, blocksize):
             imf = cp.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
             img3[:, offs:offs + blocksize, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
@@ -811,12 +890,9 @@ class BaseSimProcessor:
 
         return res
 
-    def batchreconstructcompact_pytorch(self, img, blocksize = 128):
+    def batchreconstructcompact_pytorch(self, img, blocksize=128):
         assert pytorch, "No pytorch present"
-        if torch.has_cuda:
-            dev = torch.device('cuda')
-        else:
-            dev = torch.device('cpu')
+        self.empty_cache()
         nim = img.shape[0]
         r = np.mod(nim, 2 * self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by 14
@@ -878,15 +954,26 @@ class BaseSimProcessor:
 
     def empty_cache(self):
         if pytorch:
-            print(f'\ttorch cuda memory reserved: {torch.cuda.memory_reserved() / 1e9} GB')
+            if self.debug:
+                print(f'\ttorch cuda memory reserved: {torch.cuda.memory_reserved() / 1e9} GB')
             torch.cuda.empty_cache()
-            print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
+            if self.debug:
+                print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
         if cupy:
-            print(f'\tcupy memory used: {cp._default_memory_pool.used_bytes() / 1e9} GB')
-            print(f'\tcupy memory total: {cp._default_memory_pool.total_bytes() / 1e9} GB')
+            cp.fft.config.get_plan_cache().set_size(0)
+            if self.debug:
+                print(f'\tcupy memory used: {cp._default_memory_pool.used_bytes() / 1e9} GB')
+                print(f'\tcupy memory total: {cp._default_memory_pool.total_bytes() / 1e9} GB')
             cp._default_memory_pool.free_all_blocks()
-            print(f'\tcupy memory used after clearing: {cp._default_memory_pool.used_bytes() / 1e9} GB')
-            print(f'\tcupy memory total after clearing: {cp._default_memory_pool.total_bytes() / 1e9} GB')
+            if self.debug:
+                print(f'\tcupy memory used after clearing: {cp._default_memory_pool.used_bytes() / 1e9} GB')
+                print(f'\tcupy memory total after clearing: {cp._default_memory_pool.total_bytes() / 1e9} GB')
+
+    def find_phase_pytorch(self, kx, ky, img):
+        return self.find_phase(kx, ky, img, useTorch=True)
+
+    def find_phase_cupy(self, kx, ky, img):
+        return self.find_phase(kx, ky, img, useCupy=True)
 
     def find_phase(self, kx, ky, img, useCupy=False, useTorch=False):
         # Finds the complex correlation coefficients of the spatial frequency component at (kx, ky)
@@ -896,7 +983,7 @@ class BaseSimProcessor:
         nimages = (img.shape[0] // self._nsteps) * self._nsteps
         (kx, ky) = (kx.squeeze(), ky.squeeze())
         if useTorch:
-            img = torch.as_tensor(img, dtype=torch.float32, device=self.tdev)
+            img = torch.as_tensor(np.single(img), device=self.tdev)
             kr = torch.as_tensor(self._kr, device=self.tdev)
             otf = torch.ones((self.N, self.N), dtype=torch.float32, device=self.tdev)
             imgnsum = torch.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype=torch.float32, device=self.tdev)
