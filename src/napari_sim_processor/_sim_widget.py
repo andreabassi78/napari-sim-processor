@@ -689,7 +689,7 @@ class SimAnalysis(QWidget):
         paz_stack = np.swapaxes(pa_stack, 0, 1).reshape((phases_angles*sz, sy, sx))
         if self.proc.currentData() == accel.USETORCH:
             demodulation_function = self.h.filteredOSreconstruct_pytorch
-        if self.proc.currentData() == accel.USECUPY:
+        elif self.proc.currentData() == accel.USECUPY:
             demodulation_function = self.h.filteredOSreconstruct_cupy
         else:
             demodulation_function = self.h.filteredOSreconstruct
@@ -724,7 +724,7 @@ class SimAnalysis(QWidget):
             start_time = time.time()
             if self.proc.currentData() == accel.USETORCH:
                 self.h.calibrate_pytorch(imRaw,self.find_carrier.val)
-            if self.proc.currentData() == accel.USECUPY:
+            elif self.proc.currentData() == accel.USECUPY:
                 self.h.calibrate_cupy(imRaw, self.find_carrier.val)
             else:
                 self.h.calibrate(imRaw,self.find_carrier.val)
@@ -791,13 +791,13 @@ class SimAnalysis(QWidget):
                         selected_imRaw = np.swapaxes(data, 0, 1).reshape((s_pa * new_delta, sy, sx))
                         if self.proc.currentData() == accel.USETORCH:
                             self.h.calibrate_pytorch(selected_imRaw,self.find_carrier.val)
-                        if self.proc.currentData() == accel.USECUPY:
+                        elif self.proc.currentData() == accel.USECUPY:
                             self.h.calibrate_cupy(selected_imRaw, self.find_carrier.val)
                         else:
                             self.h.calibrate(selected_imRaw,self.find_carrier.val)                
                 if self.proc.currentData() == accel.USETORCH:
                     stackSIM[zidx,:,:] = self.h.reconstruct_pytorch(phases_stack.astype(np.float32)) #TODO:this is left after conversion from torch
-                if self.proc.currentData() == accel.USECUPY:
+                elif self.proc.currentData() == accel.USECUPY:
                     stackSIM[zidx, :, :] = self.h.reconstruct_cupy(phases_stack.astype(np.float32))  # TODO:this is left after conversion from torch
                 else:
                     stackSIM[zidx,:,:] = self.h.reconstruct_rfftw(phases_stack)      
