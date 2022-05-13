@@ -886,7 +886,7 @@ class BaseSimProcessor:
 
         res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
         del img3
-        # cp._default_memory_pool.free_all_blocks()
+        cp._default_memory_pool.free_all_blocks()
 
         return res
 

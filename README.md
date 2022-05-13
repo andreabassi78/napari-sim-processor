@@ -92,6 +92,23 @@ For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
 ![raw](https://github.com/andreabassi78/napari-sim-processor/raw/main/images/Picture3.png)
 **Napari viewer with widgets showing a SIM reconstruction**
 
+## GPU processing
+
+The underlying processing classes will use numpy (and FFTW if available) for 
+its calculations. For GPU accelerated processing you need to have either the 
+PyTorch (tested with torch v1.11.0+cu113) or the CuPy (tested with cupy-cuda113 
+v10.4.0) package installed.  Make sure to match the package cuda version to the CUDA library 
+installed on your system otherwise PyTorch will default to CPU and CuPy will not work at all.  
+
+Both packages give significant speedup on even relatively modest CUDA GPUs compared 
+to Numpy, and PyTorch running on the CPU only can show improvements relative to numpy 
+and FFTW. Selection of which processing package to use is via a ComboBox in the 
+napari_sim_processor widget.  Only available packages are shown. 
+
+Other than requiring a CUDA GPU it is advisable to have significant GPU memory 
+available, particularly when processing large datasets.  Batch processing is the 
+most memory hungry of the methods, but can process 280x512x512 datasets on a 4GB GPU.
+
 ## Contributing
 
 Contributions are very welcome. Tests can be run with [tox], please ensure
