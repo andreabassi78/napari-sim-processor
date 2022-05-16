@@ -6,11 +6,14 @@ from .baseSimProcessor import BaseSimProcessor
 
 class ConvSimProcessor(BaseSimProcessor):
     '''
-    Implements conventional SIM system with two beams, three angles and three phase steps
+    Implements conventional SIM system with two beams, multiple angles and multiple phase steps
+    The default number of angles and phase steps is 3
     '''
-    def __init__(self):
-        self._nsteps = 9
-        self._nbands = 3
+    def __init__(self, angleSteps=3, phaseSteps=3):
+        assert phaseSteps >= 3
+        assert angleSteps > 0
+        self._nsteps = angleSteps * phaseSteps
+        self._nbands = angleSteps
         self.usePhases = False  # can be overridden before calibration
         super().__init__()
 
@@ -26,22 +29,22 @@ class ConvSimProcessor(BaseSimProcessor):
         :return: is the shape(self._nsteps, 2 * self._nbands + 1) matrix that constructs the illumination from the
         carrier components
         '''
+        phaseSteps = self._nsteps // self._nbands
         if phi is None:
-            phi = np.array([0, 2 * pi / 3, 4 * pi / 3])
-            phase_matrix = np.zeros((9,7))
-            phase_matrix[0:3,1] = phi
-            phase_matrix[0:3,4] = -phi
-            phase_matrix[3:6,2] = phi
-            phase_matrix[3:6,5] = -phi
-            phase_matrix[6:9,3] = phi
-            phase_matrix[6:9,6] = -phi
+            phi = np.arange(phaseSteps) * 2 * pi / phaseSteps
+            phase_matrix = np.zeros((self._nsteps, self._nbands * 2 + 1))
+            for i in range(0, self._nbands):
+                phase_matrix[i * phaseSteps:(i + 1) * phaseSteps, 1 + i] = phi
+                phase_matrix[i * phaseSteps:(i + 1) * phaseSteps, 1 + i + self._nbands] = -phi
         else:
             phase_matrix = np.append(np.append(np.zeros((self._nsteps, 1)), phi.T, axis = 1), -phi.T, axis=1)
-        ret = np.complex64(np.exp(1j * phase_matrix))
-        ret[3:9,(1,4)] = 0
-        ret[0:3,(2,5)] = 0
-        ret[6:9,(2,5)] = 0
-        ret[0:6,(3,6)] = 0
+        mask_matrix = np.zeros((self._nsteps, self._nbands * 2 + 1))
+        mask_matrix[:,0] = 1
+        for i in range(0, self._nbands):
+            mask_matrix[i * phaseSteps:(i + 1) * phaseSteps, 1 + i] = 1
+            mask_matrix[i * phaseSteps:(i + 1) * phaseSteps, 1 + i + self._nbands] = 1
+        ret = mask_matrix * np.complex64(np.exp(1j * phase_matrix))
+
         if self.debug > 1:
             print(ret)
             print(np.angle(ret))
