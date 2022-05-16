@@ -4,18 +4,25 @@ Created on Tue Jan 25 16:34:41 2022
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
 from napari_sim_processor.widget_settings import Setting
+from napari_sim_processor.baseSimProcessor import pytorch, cupy
 from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
 from napari_sim_processor.simProcessor import SimProcessor 
 import napari
-from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton
+from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton, QComboBox, QLineEdit
 from napari.layers import Image
 import numpy as np
 from napari.qt.threading import thread_worker
 from magicgui.widgets import FunctionGui
 from magicgui import magicgui, magic_factory
 import warnings
+import enum
+import time
 
+class accel(enum.Enum):
+    USENUMPY = 1
+    USETORCH = 2
+    USECUPY = 3
 
 def reshape_init(reshape_widget: FunctionGui):
     @reshape_widget.input_image.changed.connect
@@ -168,7 +175,7 @@ class SimAnalysis(QWidget):
         self.eta = Setting('eta', dtype=float, initial=0.65,
                             layout=left_layout, spinbox_decimals=3, spinbox_step=0.01,
                             write_function = self.setReconstructor)
-        self.group = Setting('group', dtype=int, initial=30, vmin=2,
+        self.group = Setting('group', dtype=int, initial=30, vmin=1,
                             layout=left_layout,
                             write_function = self.setReconstructor)
         self.use_phases = Setting('use phases', dtype=bool, initial=True, layout=left_layout,                         
@@ -203,8 +210,16 @@ class SimAnalysis(QWidget):
         self.batch = Setting('Batch Reconstruction', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
-        self.use_torch = Setting('Use Torch', dtype=bool, initial=False, layout=right_layout, 
-                           write_function = self.setReconstructor)         
+        # self.use_torch = Setting('Use Torch', dtype=bool, initial=False, layout=right_layout,
+        #                    write_function = self.setReconstructor)
+        self.proc = QComboBox()
+        self.proc.addItem('Use Numpy', userData=accel.USENUMPY)
+        if pytorch:
+            self.proc.addItem('Use PyTorch', userData=accel.USETORCH)
+        if cupy:
+            self.proc.addItem('Use CuPy', userData=accel.USECUPY)
+        right_layout.addWidget(self.proc)
+
         buttons_dict = {'Widefield': self.calculate_WF_image,
                         'Calibrate': self.calibration,
                         'Plot calibration phases':self.find_phaseshifts,
@@ -215,8 +230,11 @@ class SimAnalysis(QWidget):
         for button_name, call_function in buttons_dict.items():
             button = QPushButton(button_name)
             button.clicked.connect(call_function)
-            right_layout.addWidget(button) 
-    
+            right_layout.addWidget(button)
+
+        self.messageBox = QLineEdit()
+        layout.addWidget(self.messageBox, stretch=True)
+        self.messageBox.setText('Messages')
         
     def add_magic_layer_selection(self,_layout):
         function = self.select_layer
@@ -526,9 +544,13 @@ class SimAnalysis(QWidget):
         if self.is_image_in_layers():
             imname = 'Xcorr_' + self.imageRaw_name
             if self.showXcorr.val and hasattr(self,'h'):
-                
                 im = self.get_current_stack_for_calibration()
-                ixf = np.squeeze(self.h.crossCorrelations(im))
+                if self.proc.currentData() == accel.USETORCH:
+                    ixf = np.squeeze(self.h.crossCorrelations_pytorch(im))
+                elif self.proc.currentData() == accel.USECUPY:
+                    ixf = np.squeeze(self.h.crossCorrelations_cupy(im))
+                else:
+                    ixf = np.squeeze(self.h.crossCorrelations(im))
                 if ixf.ndim >2:
                     phase_index = int(self.viewer.dims.current_step[1])
                     carrier_idx = phase_index % ixf.shape[0]
@@ -665,8 +687,10 @@ class SimAnalysis(QWidget):
         phases_angles = sa*sp
         pa_stack = fullstack.reshape(phases_angles, sz, sy, sx)
         paz_stack = np.swapaxes(pa_stack, 0, 1).reshape((phases_angles*sz, sy, sx))
-        if self.use_torch.val: # implemented demodulation in torch, conversion to float32 internal to function call
+        if self.proc.currentData() == accel.USETORCH:
             demodulation_function = self.h.filteredOSreconstruct_pytorch
+        elif self.proc.currentData() == accel.USECUPY:
+            demodulation_function = self.h.filteredOSreconstruct_cupy
         else:
             demodulation_function = self.h.filteredOSreconstruct
         demodulated = np.squeeze(demodulation_function(paz_stack))
@@ -696,11 +720,16 @@ class SimAnalysis(QWidget):
         *args is to avoid conflic with the add_timer decorator
         '''
         if hasattr(self, 'h'):
-            imRaw = self.get_current_stack_for_calibration()         
-            if self.use_torch.val:
+            imRaw = self.get_current_stack_for_calibration()
+            start_time = time.time()
+            if self.proc.currentData() == accel.USETORCH:
                 self.h.calibrate_pytorch(imRaw,self.find_carrier.val)
+            elif self.proc.currentData() == accel.USECUPY:
+                self.h.calibrate_cupy(imRaw, self.find_carrier.val)
             else:
                 self.h.calibrate(imRaw,self.find_carrier.val)
+            elapsed_time = time.time() - start_time
+            self.messageBox.setText(f'Calibration time {elapsed_time:.3f}s')
             self.isCalibrated = True
             if self.find_carrier.val: # store the value found   
                 self.kx_input = self.h.kx  
@@ -722,8 +751,10 @@ class SimAnalysis(QWidget):
         dshape= current_image.shape
         phases_angles = self.phases_number.val*self.angles_number.val
         rdata = current_image.reshape(phases_angles, dshape[-2],dshape[-1])
-        if self.use_torch.val:
+        if self.proc.currentData() == accel.USETORCH:
             imageSIM = self.h.reconstruct_pytorch(rdata.astype(np.float32)) #TODO:this is left after conversion from torch
+        elif self.proc.currentData() == accel.USECUPY:
+            imageSIM = self.h.reconstruct_cupy(rdata.astype(np.float32))  # TODO:this is left after conversion from torch
         else:
             imageSIM = self.h.reconstruct_rfftw(rdata)
         imname = 'SIM_' + self.imageRaw_name
@@ -750,7 +781,7 @@ class SimAnalysis(QWidget):
                 phases_stack = np.squeeze(pa_stack[:,zidx,:,:])
                 if self.keep_calibrating.val:
                     delta = self.group.val // 2
-                    if zidx % delta == 0: 
+                    if (delta == 0) or (zidx % delta == 0):
                         remainer = self.group.val % 2
                         zmin = max(zidx-delta,0)
                         zmax = min(zidx+delta+remainer,sz)
@@ -758,12 +789,16 @@ class SimAnalysis(QWidget):
                         data = pa_stack[:,zmin:zmax,:,:]
                         s_pa = data.shape[0]
                         selected_imRaw = np.swapaxes(data, 0, 1).reshape((s_pa * new_delta, sy, sx))
-                        if self.use_torch.val:
+                        if self.proc.currentData() == accel.USETORCH:
                             self.h.calibrate_pytorch(selected_imRaw,self.find_carrier.val)
+                        elif self.proc.currentData() == accel.USECUPY:
+                            self.h.calibrate_cupy(selected_imRaw, self.find_carrier.val)
                         else:
                             self.h.calibrate(selected_imRaw,self.find_carrier.val)                
-                if self.use_torch.val:
+                if self.proc.currentData() == accel.USETORCH:
                     stackSIM[zidx,:,:] = self.h.reconstruct_pytorch(phases_stack.astype(np.float32)) #TODO:this is left after conversion from torch
+                elif self.proc.currentData() == accel.USECUPY:
+                    stackSIM[zidx, :, :] = self.h.reconstruct_cupy(phases_stack.astype(np.float32))  # TODO:this is left after conversion from torch
                 else:
                     stackSIM[zidx,:,:] = self.h.reconstruct_rfftw(phases_stack)      
             return stackSIM
@@ -771,10 +806,15 @@ class SimAnalysis(QWidget):
         @thread_worker(connect={'returned': update_sim_image})
         def _batch_reconstruction():
             warnings.filterwarnings('ignore')
-            if self.use_torch.val:
+            start_time = time.time()
+            if self.proc.currentData() == accel.USETORCH:
                 stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize = 32)
+            elif self.proc.currentData() == accel.USECUPY:
+                stackSIM = self.h.batchreconstructcompact_cupy(paz_stack, blocksize=32)
             else:
                 stackSIM = self.h.batchreconstructcompact(paz_stack)
+            elapsed_time = time.time() - start_time
+            self.messageBox.setText(f'Batch reconstruction time {elapsed_time:.3f}s')
             return stackSIM
         
         # main function exetuted here
@@ -806,7 +846,12 @@ class SimAnalysis(QWidget):
         sa,sp,sy,sx = stack.shape
         img = stack.reshape(sa*sp, sy, sx) 
         for i in range (3):
-            phase, _ = self.h.find_phase(self.h.kx[i], self.h.ky[i], img)
+            if self.proc.currentData() == accel.USETORCH:
+                phase, _ = self.h.find_phase_pytorch(self.h.kx[i], self.h.ky[i], img)
+            elif self.proc.currentData() == accel.USECUPY:
+                phase, _ = self.h.find_phase_cupy(self.h.kx[i], self.h.ky[i], img)
+            else:
+                phase, _ = self.h.find_phase(self.h.kx[i], self.h.ky[i], img)
             expected_phase[:,i] = np.arange(7) * 2*(i+1) * np.pi / 7
             phaseshift[:,i] = np.unwrap(phase - phase[0] - expected_phase[:,i]) + expected_phase[:,i]
         error = phaseshift-expected_phase
@@ -825,7 +870,12 @@ class SimAnalysis(QWidget):
             phaseshift = np.zeros((sp,sa))
             expected_phase = np.zeros((sp,sa))
             error = np.zeros((sp,sa))
-            phase, _ = self.h.find_phase(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
+            if self.proc.currentData() == accel.USETORCH:
+                phase, _ = self.h.find_phase_pytorch(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
+            elif self.proc.currentData() == accel.USECUPY:
+                phase, _ = self.h.find_phase_cupy(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
+            else:
+                phase, _ = self.h.find_phase(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
             phase = np.unwrap(phase)
             phase = phase.reshape(sa,sp).T
             expected_phase[:,angle_idx] = np.arange(sp) * 2*np.pi / sp
