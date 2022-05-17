@@ -43,7 +43,7 @@ class ConvSimProcessor(BaseSimProcessor):
         for i in range(0, self._nbands):
             mask_matrix[i * phaseSteps:(i + 1) * phaseSteps, 1 + i] = 1
             mask_matrix[i * phaseSteps:(i + 1) * phaseSteps, 1 + i + self._nbands] = 1
-        ret = mask_matrix * np.complex64(np.exp(1j * phase_matrix))
+        ret = np.complex64(mask_matrix * np.exp(1j * phase_matrix))
 
         if self.debug > 1:
             print(ret)
