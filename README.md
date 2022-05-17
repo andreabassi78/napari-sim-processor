@@ -20,7 +20,7 @@ Currently only square images are supported (`x`=`y`)
 For raw image stacks with multiple z-frames each plane is processed as described here:
 	https://doi.org/10.1098/rsta.2020.0162
         
-Support for N angles and M phases is in progress.
+Support for N angles and M phases is now available.
 Support for 3D SIM with enhanced resolution in all directions is not yet available.
 Multicolor reconstruction is not yet available.  
 

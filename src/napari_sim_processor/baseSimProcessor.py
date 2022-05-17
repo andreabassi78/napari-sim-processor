@@ -757,10 +757,10 @@ class BaseSimProcessor:
 
     def batchreconstruct(self, img):
         nim = img.shape[0]
-        r = np.mod(nim, 2 * self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by 14
-            img = np.concatenate((img, np.zeros((2 * self._nsteps - r, self.N, self.N), np.single)))
-            nim = nim + 2 * self._nsteps - r
+        r = np.mod(nim, self._nsteps)
+        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), np.single)))
+            nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         imf = fft.rfft2(img) * self._prefilter[:, 0:self.N // 2 + 1]
         img2 = np.zeros([nim, 2 * self.N, 2 * self.N], dtype=np.single)
@@ -775,10 +775,10 @@ class BaseSimProcessor:
 
     def batchreconstructcompact(self, img, blocksize=128):
         nim = img.shape[0]
-        r = np.mod(nim, 2 * self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by 14
-            img = np.concatenate((img, np.zeros((2 * self._nsteps - r, self.N, self.N), np.single)))
-            nim = nim + 2 * self._nsteps - r
+        r = np.mod(nim, self._nsteps)
+        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), np.single)))
+            nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         imf = fft.rfft2(img) * self._prefilter[:, 0:self.N // 2 + 1]
         img2 = np.zeros([nim, 2 * self.N, 2 * self.N], dtype=np.single)
@@ -803,10 +803,10 @@ class BaseSimProcessor:
         cp._default_memory_pool.free_all_blocks()
         img = cp.asarray(img, dtype=np.float32)
         nim = img.shape[0]
-        r = np.mod(nim, 2 * self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by 14
-            img = np.concatenate((img, cp.zeros((2 * self._nsteps - r, self.N, self.N), np.single)))
-            nim = nim + 2 * self._nsteps - r
+        r = np.mod(nim, self._nsteps)
+        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+            img = np.concatenate((img, cp.zeros((self._nsteps - r, self.N, self.N), np.single)))
+            nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         imf = cp.fft.rfft2(img) * cp.asarray(self._prefilter[:, 0:self.N // 2 + 1])
 
@@ -851,10 +851,10 @@ class BaseSimProcessor:
         self.empty_cache()
         img = cp.array(img, dtype=np.float32)
         nim = img.shape[0]
-        r = np.mod(nim, 2 * self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by 14
-            img = cp.concatenate((img, cp.zeros((2 * self._nsteps - r, self.N, self.N), np.single)))
-            nim = nim + 2 * self._nsteps - r
+        r = np.mod(nim, self._nsteps)
+        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+            img = cp.concatenate((img, cp.zeros((self._nsteps - r, self.N, self.N), np.single)))
+            nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         imf = cp.fft.rfft2(img) * cp.array(self._prefilter[:, 0:self.N // 2 + 1])
 
@@ -894,10 +894,10 @@ class BaseSimProcessor:
         assert pytorch, "No pytorch present"
         self.empty_cache()
         nim = img.shape[0]
-        r = np.mod(nim, 2 * self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by 14
-            img = np.concatenate((img, np.zeros((2 * self._nsteps - r, self.N, self.N), img.dtype)))
-            nim = nim + 2 * self._nsteps - r
+        r = np.mod(nim, self._nsteps)
+        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), img.dtype)))
+            nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         img1 = torch.as_tensor(np.single(img), dtype=torch.float32, device=self.tdev)
         imf = torch.fft.rfft2(img1) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)
@@ -929,10 +929,10 @@ class BaseSimProcessor:
         else:
             dev = torch.device('cpu')
         nim = img.shape[0]
-        r = np.mod(nim, 2 * self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by 14
-            img = np.concatenate((img, np.zeros((2 * self._nsteps - r, self.N, self.N), img.dtype)))
-            nim = nim + 2 * self._nsteps - r
+        r = np.mod(nim, self._nsteps)
+        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), img.dtype)))
+            nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         img = torch.as_tensor(np.single(img), dtype=torch.float32, device=self.tdev)
         imf = torch.fft.rfft2(img) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)

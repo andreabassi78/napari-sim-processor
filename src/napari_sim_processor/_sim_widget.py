@@ -100,7 +100,7 @@ def reshape(viewer: napari.Viewer,
             raise(ValueError('Input stack order reshaping not implemented'))
         input_image.data = rdata
         viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
-
+        viewer.dims.set_point(axis=[0,1,2], value=[0,0,0])
 
 class SimAnalysis(QWidget):
     '''
@@ -449,9 +449,10 @@ class SimAnalysis(QWidget):
             elif self.phases_number.val == 7:  
                 self.h = HexSimProcessor()  
                 k_shape = (3,1)
-            elif self.phases_number.val == 3 and self.angles_number.val == 3: 
-                self.h = ConvSimProcessor()
-                k_shape = (3,1)
+            elif self.phases_number.val >= 3 and self.angles_number.val > 0:
+                self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
+                                          phaseSteps=self.phases_number.val)
+                k_shape = (self.angles_number.val,1)
             else: 
                 raise(ValueError("Invalid phases or angles number"))
             self.h.debug = False
@@ -574,9 +575,9 @@ class SimAnalysis(QWidget):
         '''
         dx = self.h.pixelsize / self.h.magnification  # Sampling in image plane
         res = self.h.wavelength / (2 * self.h.NA)
-        cutoff = 1/res/2 # coherent cutoff frequency
+        cutoff = 1 # coherent cutoff frequency
         oversampling = res / dx
-        dk = oversampling / (N / 2)  
+        dk = oversampling / (N / 2) # k space is normalised to coherent cutoff
         cutoff_in_pixels = cutoff / dk
         return cutoff_in_pixels, dk   
       
@@ -614,10 +615,10 @@ class SimAnalysis(QWidget):
             if self.showEta.val:
                 N = self.h.N
                 cutoff, dk   = self.calculate_kr(N)  
-                eta_radius = self.h.eta * cutoff
+                eta_radius = 1.9 * self.h.eta * cutoff
                 self.add_circles(np.array([N/2,N/2]), eta_radius,
                                name, color='green')
-                self.add_circles(np.array([N/2,N/2]), cutoff,
+                self.add_circles(np.array([N/2,N/2]), 2 * cutoff,
                                name, color='blue', hold=True)
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])
@@ -693,7 +694,9 @@ class SimAnalysis(QWidget):
             demodulation_function = self.h.filteredOSreconstruct_cupy
         else:
             demodulation_function = self.h.filteredOSreconstruct
-        demodulated = np.squeeze(demodulation_function(paz_stack))
+        demodulated = demodulation_function(paz_stack)
+        if demodulated.ndim < 3:
+            demodulated = demodulated[np.newaxis, :]
         imname = 'Demodulated_' + self.imageRaw_name
         scale = [self.zscaling,1,1]
         self.show_image(demodulated, imname, scale=scale, hold=True, autoscale=True)
@@ -920,7 +923,7 @@ class SimAnalysis(QWidget):
         ticks = np.linspace(0, vmax*(vales_num-1)/vales_num, 2*vales_num-1 )
         ax.set_yticks(ticks)
         fig.tight_layout()
-        plt.show()
+        plt.show(block=False)
         plt.rcParams.update(plt.rcParamsDefault)
 
 
