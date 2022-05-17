@@ -100,7 +100,7 @@ def reshape(viewer: napari.Viewer,
             raise(ValueError('Input stack order reshaping not implemented'))
         input_image.data = rdata
         viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
-
+        viewer.dims.set_point(axis=[0,1,2], value=[0,0,0])
 
 class SimAnalysis(QWidget):
     '''
