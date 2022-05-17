@@ -82,7 +82,7 @@ class BaseSimProcessor:
         self._carray = np.zeros((self._nsteps, 2 * self.N, 2 * self.N), dtype=np.complex64)
         self._carray1 = np.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
 
-        self._imgstore = np.zeros((self._nsteps, 2 * self.N, 2 * self.N), dtype=np.single)
+        self._imgstore = np.zeros((self._nsteps, self.N, self.N), dtype=np.single)
         self._bigimgstore = np.zeros((2 * self.N, 2 * self.N), dtype=np.single)
         if cupy:
             self._carray_cp = cp.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
