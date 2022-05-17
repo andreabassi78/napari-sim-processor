@@ -694,7 +694,9 @@ class SimAnalysis(QWidget):
             demodulation_function = self.h.filteredOSreconstruct_cupy
         else:
             demodulation_function = self.h.filteredOSreconstruct
-        demodulated = np.squeeze(demodulation_function(paz_stack))
+        demodulated = demodulation_function(paz_stack)
+        if demodulated.ndim < 3:
+            demodulated = demodulated[np.newaxis, :]
         imname = 'Demodulated_' + self.imageRaw_name
         scale = [self.zscaling,1,1]
         self.show_image(demodulated, imname, scale=scale, hold=True, autoscale=True)
