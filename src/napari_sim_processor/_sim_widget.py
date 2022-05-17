@@ -923,7 +923,7 @@ class SimAnalysis(QWidget):
         ticks = np.linspace(0, vmax*(vales_num-1)/vales_num, 2*vales_num-1 )
         ax.set_yticks(ticks)
         fig.tight_layout()
-        plt.show()
+        plt.show(block=False)
         plt.rcParams.update(plt.rcParamsDefault)
 
 
