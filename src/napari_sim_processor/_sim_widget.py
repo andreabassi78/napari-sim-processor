@@ -449,9 +449,10 @@ class SimAnalysis(QWidget):
             elif self.phases_number.val == 7:  
                 self.h = HexSimProcessor()  
                 k_shape = (3,1)
-            elif self.phases_number.val == 3 and self.angles_number.val == 3: 
-                self.h = ConvSimProcessor()
-                k_shape = (3,1)
+            elif self.phases_number.val >= 3 and self.angles_number.val > 0:
+                self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
+                                          phaseSteps=self.phases_number.val)
+                k_shape = (self.angles_number.val,1)
             else: 
                 raise(ValueError("Invalid phases or angles number"))
             self.h.debug = False
