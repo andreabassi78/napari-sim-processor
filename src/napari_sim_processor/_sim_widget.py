@@ -575,9 +575,9 @@ class SimAnalysis(QWidget):
         '''
         dx = self.h.pixelsize / self.h.magnification  # Sampling in image plane
         res = self.h.wavelength / (2 * self.h.NA)
-        cutoff = 1/res/2 # coherent cutoff frequency
+        cutoff = 1 # coherent cutoff frequency
         oversampling = res / dx
-        dk = oversampling / (N / 2)  
+        dk = oversampling / (N / 2) # k space is normalised to coherent cutoff
         cutoff_in_pixels = cutoff / dk
         return cutoff_in_pixels, dk   
       
@@ -615,10 +615,10 @@ class SimAnalysis(QWidget):
             if self.showEta.val:
                 N = self.h.N
                 cutoff, dk   = self.calculate_kr(N)  
-                eta_radius = self.h.eta * cutoff
+                eta_radius = 1.9 * self.h.eta * cutoff
                 self.add_circles(np.array([N/2,N/2]), eta_radius,
                                name, color='green')
-                self.add_circles(np.array([N/2,N/2]), cutoff,
+                self.add_circles(np.array([N/2,N/2]), 2 * cutoff,
                                name, color='blue', hold=True)
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])
