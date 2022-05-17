@@ -225,6 +225,7 @@ class SimAnalysis(QWidget):
                         'Plot calibration phases':self.find_phaseshifts,
                         'SIM reconstruction': self.single_plane_reconstruction,
                         'Stack SIM reconstruction': self.stack_reconstruction,
+                        'Stream SIM reconstruction': self.stream_reconstruction,
                         'Stack demodulation': self.stack_demodulation,
                         }
         for button_name, call_function in buttons_dict.items():
@@ -762,12 +763,12 @@ class SimAnalysis(QWidget):
             imageSIM = self.h.reconstruct_rfftw(rdata)
         imname = 'SIM_' + self.imageRaw_name
         self.show_image(imageSIM, im_name=imname, scale=[0.5,0.5], hold =True, autoscale = True)
-    
-    
+
+
     def stack_reconstruction(self):
         '''
         Performs SIM reconstruction on entire data (5D raw image stack).
-        Performs plane-by-plane reconstruction (_stack_reconstruction), 
+        Performs plane-by-plane reconstruction (_stack_reconstruction),
             calibrating the Processor continuosly if "Continuous calibration" checkbox is selected
         Performs batch reconstruction if "Batch reconstrction" checkbox is selected
         '''
@@ -775,7 +776,7 @@ class SimAnalysis(QWidget):
             imname = 'SIMstack_' + self.imageRaw_name
             scale = [self.zscaling, 0.5, 0.5]
             self.show_image(stack, im_name=imname, scale=scale, hold = True, autoscale = True)
-        
+
         @thread_worker(connect={'returned': update_sim_image})
         def _stack_reconstruction():
             warnings.filterwarnings('ignore')
@@ -797,15 +798,15 @@ class SimAnalysis(QWidget):
                         elif self.proc.currentData() == accel.USECUPY:
                             self.h.calibrate_cupy(selected_imRaw, self.find_carrier.val)
                         else:
-                            self.h.calibrate(selected_imRaw,self.find_carrier.val)                
+                            self.h.calibrate(selected_imRaw,self.find_carrier.val)
                 if self.proc.currentData() == accel.USETORCH:
                     stackSIM[zidx,:,:] = self.h.reconstruct_pytorch(phases_stack.astype(np.float32)) #TODO:this is left after conversion from torch
                 elif self.proc.currentData() == accel.USECUPY:
                     stackSIM[zidx, :, :] = self.h.reconstruct_cupy(phases_stack.astype(np.float32))  # TODO:this is left after conversion from torch
                 else:
-                    stackSIM[zidx,:,:] = self.h.reconstruct_rfftw(phases_stack)      
+                    stackSIM[zidx,:,:] = self.h.reconstruct_rfftw(phases_stack)
             return stackSIM
-        
+
         @thread_worker(connect={'returned': update_sim_image})
         def _batch_reconstruction():
             warnings.filterwarnings('ignore')
@@ -819,7 +820,7 @@ class SimAnalysis(QWidget):
             elapsed_time = time.time() - start_time
             self.messageBox.setText(f'Batch reconstruction time {elapsed_time:.3f}s')
             return stackSIM
-        
+
         # main function exetuted here
         assert self.isCalibrated, 'SIM processor not calibrated, unable to perform SIM reconstruction'
         fullstack = self.get_hyperstack()
@@ -829,10 +830,51 @@ class SimAnalysis(QWidget):
         paz_stack = np.swapaxes(pa_stack, 0, 1).reshape((phases_angles*sz, sy, sx))
         if self.batch.val:
             _batch_reconstruction()
-        else: 
+        else:
             _stack_reconstruction()
-                
-          
+
+    def stream_reconstruction(self):
+        '''
+        Performs SIM reconstruction on entire data (5D raw image stack).
+        Performs frame-by-frame reconstruction (_stream_reconstruction),
+            to produce a SR stack with as many images as in the raw dataset
+            prior calibration is assumed, no continuous recalibration is performed
+        '''
+
+        def update_streamed_sim_image(stack):
+            elapsed_time = time.time() - start_time
+            self.messageBox.setText(f'Stream reconstruction time {elapsed_time:.3f}s')
+            imname = 'StreamStack_' + self.imageRaw_name
+            scale = [self.zscaling / (sa * sp), 0.5, 0.5]
+            self.show_image(stack, im_name=imname, scale=scale, hold=True, autoscale=True)
+
+        @thread_worker(connect={'returned': update_streamed_sim_image})
+        def _stream_reconstruction():
+            warnings.filterwarnings('ignore')
+            stackSIM = np.zeros([sz * sa * sp, 2 * sy, 2 * sx], dtype=np.single)
+            for zidx in range(sz):
+                idx = 0
+                for aidx in range(sa):
+                    for pidx in range(sp):
+                        if self.proc.currentData() == accel.USETORCH:
+                            stackSIM[zidx * sa * sp + aidx * sp + pidx, :, :] = self.h.reconstructframe_pytorch(
+                                np.squeeze(fullstack[aidx, pidx, zidx, :, :]).astype(np.float32), idx)
+                        elif self.proc.currentData() == accel.USECUPY:
+                            stackSIM[zidx * sa * sp + aidx * sp + pidx, :, :] = self.h.reconstructframe_cupy(
+                                np.squeeze(fullstack[aidx, pidx, zidx, :, :]).astype(np.float32), idx)
+                        else:
+                            stackSIM[zidx * sa * sp + aidx * sp + pidx, :, :] = self.h.reconstructframe_rfftw(
+                                np.squeeze(fullstack[aidx, pidx, zidx, :, :]).astype(np.float32), idx)
+                        idx = idx + 1
+            return stackSIM
+
+        # main function exetuted here
+        assert self.isCalibrated, 'SIM processor not calibrated, unable to perform SIM reconstruction'
+        fullstack = self.get_hyperstack()
+        sa, sp, sz, sy, sx = fullstack.shape
+        start_time = time.time()
+        _stream_reconstruction()
+
     def find_phaseshifts(self):
         assert self.isCalibrated, 'SIM processor not calibrated, unable to show phases'
         if self.phases_number.val==7:
