@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 try:
     import torch
     pytorch = True
+    print('pytorch found')
 except ModuleNotFoundError as err:
-    print(err)
+    #print(err)
     pytorch = False
 
 try:

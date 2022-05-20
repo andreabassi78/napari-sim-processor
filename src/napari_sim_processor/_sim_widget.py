@@ -7,7 +7,7 @@ from napari_sim_processor.widget_settings import Setting
 from napari_sim_processor.baseSimProcessor import pytorch, cupy
 from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
-from napari_sim_processor.simProcessor import SimProcessor 
+from napari_sim_processor.simProcessor import SimProcessor
 import napari
 from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton, QComboBox, QLineEdit
 from napari.layers import Image
@@ -18,6 +18,7 @@ from magicgui import magicgui, magic_factory
 import warnings
 import enum
 import time
+from superqt.utils import qthrottled
 
 class accel(enum.Enum):
     USENUMPY = 1
@@ -304,7 +305,7 @@ class SimAnalysis(QWidget):
                 current_step[dim_idx] = data.shape[dim_idx]//2
             self.viewer.dims.current_step = current_step                
            
-            
+    @qthrottled (timeout=250)
     def on_step_change(self, *args):   
         if hasattr(self, 'imageRaw_name'):
             self.setReconstructor()
