@@ -25,6 +25,7 @@ class accel(enum.Enum):
     USETORCH = 2
     USECUPY = 3
 
+
 def reshape_init(reshape_widget: FunctionGui):
     @reshape_widget.input_image.changed.connect
     def _on_image_changed(input_image: Image):
