@@ -205,14 +205,17 @@ class SimAnalysis(QWidget):
                                      layout=right_layout,
                                      write_function = self.show_carrier
                                      )
+        self.carrier_idx = Setting('Carrier index', dtype=int, initial=0,
+                                   layout=right_layout, vmin = 0,
+                                   write_function = self.show_xcorr
+                                   )
         self.keep_calibrating = Setting('Continuos Calibration', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
         self.batch = Setting('Batch Reconstruction', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
-        # self.use_torch = Setting('Use Torch', dtype=bool, initial=False, layout=right_layout,
-        #                    write_function = self.setReconstructor)
+
         self.proc = QComboBox()
         self.proc.addItem('Use Numpy', userData=accel.USENUMPY)
         if pytorch:
@@ -305,15 +308,21 @@ class SimAnalysis(QWidget):
                 current_step[dim_idx] = data.shape[dim_idx]//2
             self.viewer.dims.current_step = current_step                
            
-    @qthrottled (timeout=250)
+    @qthrottled (timeout=10)
     def on_step_change(self, *args):   
         if hasattr(self, 'imageRaw_name'):
+            t0 = time.time()
             self.setReconstructor()
             self.show_spectrum()
             self.show_xcorr()
-            
-            
-                 
+            min_timeout = 10 #ms
+            delta_t = time.time() - t0
+            self.set_timeout(delta_t + min_timeout)
+
+    def set_timeout(self, new_timeout):
+        self.on_step_change.set_timeout(new_timeout)
+
+
     def show_image(self, image_values, im_name, **kwargs):
         '''
         creates a new Image layer with image_values as data
@@ -555,9 +564,8 @@ class SimAnalysis(QWidget):
                     ixf = np.squeeze(self.h.crossCorrelations(im))
                 if ixf.ndim >2:
                     phase_index = int(self.viewer.dims.current_step[1])
-                    carrier_idx = phase_index % ixf.shape[0]
-                    # if multiple carriers are found, the phase index is used to show it
-                    ixf=ixf[carrier_idx,:,:]
+                    carrier_idx = self.carrier_idx.val % ixf.shape[0] # the modulus is to show only the exixting carrier(s)
+                    ixf =ixf [carrier_idx,:,:]
                 self.show_image(ixf, imname, hold = True,
                                 colormap ='twilight', autoscale = True)
                 self.show_carrier()
@@ -838,7 +846,7 @@ class SimAnalysis(QWidget):
         assert self.isCalibrated, 'SIM processor not calibrated, unable to show phases'
         if self.phases_number.val==7:
             self.find_hexsim_phaseshifts()
-        elif self.phases_number.val==3 :
+        elif self.phases_number.val==3 or self.phases_number.val==5 : #TODO make more general with combobox
             self.find_sim_phaseshifts()
         
         
@@ -929,18 +937,14 @@ class SimAnalysis(QWidget):
 
 
 if __name__ == '__main__':
-    
+
     import napari
-    
     viewer = napari.Viewer()
-    
     widget = SimAnalysis(viewer)
-    
     my_reshape_widget = reshape()    
     viewer.window.add_dock_widget(my_reshape_widget, name = 'Reshape stack', add_vertical_stretch = True)
     viewer.window.add_dock_widget(widget,
                                   name = 'Sim analyzer @Polimi',
                                   add_vertical_stretch = True)
-    
     napari.run() 
      
