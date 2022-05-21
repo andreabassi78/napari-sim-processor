@@ -101,7 +101,7 @@ def reshape(viewer: napari.Viewer,
             raise(ValueError('Input stack order reshaping not implemented'))
         input_image.data = rdata
         viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
-        viewer.dims.set_point(axis=[0,1,2], value=[0,0,0])
+        viewer.dims.set_point(axis=[0,1,2], value=[0,0,0]) #TODO  check why this is raising ValueError sistematically 
 
 class SimAnalysis(QWidget):
     '''
@@ -185,6 +185,10 @@ class SimAnalysis(QWidget):
                                      layout=left_layout, 
                                      write_function = self.setReconstructor) 
         # Fill bottom-right layout    
+        self.carrier_idx = Setting('Carrier index', dtype=int, initial=0,
+                                   layout=right_layout, vmin = 0,
+                                   write_function = self.show_xcorr
+                                   )
         self.showXcorr = Setting('Show Xcorr', dtype=bool, initial=False,
                                      layout=right_layout,
                                      write_function = self.show_xcorr
@@ -205,10 +209,6 @@ class SimAnalysis(QWidget):
                                      layout=right_layout,
                                      write_function = self.show_carrier
                                      )
-        self.carrier_idx = Setting('Carrier index', dtype=int, initial=0,
-                                   layout=right_layout, vmin = 0,
-                                   write_function = self.show_xcorr
-                                   )
         self.keep_calibrating = Setting('Continuos Calibration', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
@@ -556,16 +556,21 @@ class SimAnalysis(QWidget):
             imname = 'Xcorr_' + self.imageRaw_name
             if self.showXcorr.val and hasattr(self,'h'):
                 im = self.get_current_stack_for_calibration()
+                # choose the gpu acceleration
                 if self.proc.currentData() == accel.USETORCH:
                     ixf = np.squeeze(self.h.crossCorrelations_pytorch(im))
                 elif self.proc.currentData() == accel.USECUPY:
                     ixf = np.squeeze(self.h.crossCorrelations_cupy(im))
                 else:
                     ixf = np.squeeze(self.h.crossCorrelations(im))
+                # show the slected carrier
                 if ixf.ndim >2:
-                    phase_index = int(self.viewer.dims.current_step[1])
-                    carrier_idx = self.carrier_idx.val % ixf.shape[0] # the modulus is to show only the exixting carrier(s)
-                    ixf =ixf [carrier_idx,:,:]
+                    carriers_number = ixf.shape[0]
+                    self.carrier_idx.set_min_max(0,carriers_number)
+                    carrier_idx = self.carrier_idx.val
+                    ixf =ixf [carrier_idx,:,:]   
+                else:
+                    self.carrier_idx.set_min_max(0,0)
                 self.show_image(ixf, imname, hold = True,
                                 colormap ='twilight', autoscale = True)
                 self.show_carrier()
@@ -829,7 +834,7 @@ class SimAnalysis(QWidget):
             self.messageBox.setText(f'Batch reconstruction time {elapsed_time:.3f}s')
             return stackSIM
         
-        # main function exetuted here
+        # main function executed here
         assert self.isCalibrated, 'SIM processor not calibrated, unable to perform SIM reconstruction'
         fullstack = self.get_hyperstack()
         sa,sp,sz,sy,sx = fullstack.shape

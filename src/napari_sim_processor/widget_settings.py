@@ -118,7 +118,13 @@ class Setting():
         lab.setWordWrap(False)
         settingLayout.addRow(sbox,lab)
         layout.addLayout(settingLayout)
-        self.sbox = sbox  
+        self.sbox = sbox 
+    
+    def set_min_max(self, vmin = 0, vmax = 3):
+        vmax = self.dtype(vmax)
+        vmin = self.dtype(vmin)
+        self.sbox.setMaximum(vmax)
+        self.sbox.setMinimum(vmin)
 
 
 def add_timer(function):
