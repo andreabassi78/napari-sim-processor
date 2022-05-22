@@ -111,7 +111,7 @@ class SimAnalysis(QWidget):
     A Napari plugin for the reconstruction of Structured Illumination microscopy (SIM) data with GPU acceleration (with pytorch, if installed).
     Currently supports:    
    - conventional data with improved resolution in 1D (1 angle, 3 phases)
-   - conventional data (3 angles, 3 phases)
+   - conventional data with a generic number of phases (3 angles, N phases)
    - hexagonal SIM (1 angle, 7 phases).
     Accepts image stacks organized in 5D (angle,phase,z,y,x).
     For stacks with multiple z-frames each plane is processed as described in:
@@ -569,7 +569,7 @@ class SimAnalysis(QWidget):
                 # show the slected carrier
                 if ixf.ndim >2:
                     carriers_number = ixf.shape[0]
-                    self.carrier_idx.set_min_max(0,carriers_number)
+                    self.carrier_idx.set_min_max(0,carriers_number-1)
                     carrier_idx = self.carrier_idx.val
                     ixf =ixf [carrier_idx,:,:]   
                 else:

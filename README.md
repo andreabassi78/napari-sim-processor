@@ -9,18 +9,17 @@
 
 A Napari plugin for the reconstruction of Structured Illumination Microscopy (SIM) with GPU acceleration (with pytorch, if installed).
 Currently supports:    
-   - conventional SIM data for resolution improvement in 1D (1 angle, 3 phases)
-   - conventional SIM data for resolution improvement in 2D (3 angles, 3 phases)
-   - hexagonal SIM data for resolution improvement in 2D (7 phases).
+   - conventional SIM data with a generic number of angle and phases (typically, 3 angles and 3 phases are used for resolution improvement in 2D)
+   - hexagonal SIM data with 7 phases.
 
 The SIM processing widget accepts image stacks organized in 5D (`angle`,`phase`,`z`,`y`,`x`).
-A reshape widget is availbale, to easily reshape the data if they are organized differently than 5D (angle,phase,z,y,x)
+
+The reshape widget can be used to easily reshape the data if they are not organized as 5D (angle,phase,z,y,x).
 Currently only square images are supported (`x`=`y`)
 
 For raw image stacks with multiple z-frames each plane is processed as described here:
 	https://doi.org/10.1098/rsta.2020.0162
         
-Support for N angles and M phases is now available.
 Support for 3D SIM with enhanced resolution in all directions is not yet available.
 Multicolor reconstruction is not yet available.  
 
