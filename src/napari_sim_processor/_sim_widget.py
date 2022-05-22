@@ -20,6 +20,7 @@ import enum
 import time
 from superqt.utils import qthrottled
 
+
 class accel(enum.Enum):
     USENUMPY = 1
     USETORCH = 2
@@ -104,6 +105,7 @@ def reshape(viewer: napari.Viewer,
         viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
         viewer.dims.set_point(axis=[0,1,2], value=[0,0,0]) #TODO  check why this is raising ValueError sistematically 
 
+
 class SimAnalysis(QWidget):
     '''
     A Napari plugin for the reconstruction of Structured Illumination microscopy (SIM) data with GPU acceleration (with pytorch, if installed).
@@ -186,7 +188,7 @@ class SimAnalysis(QWidget):
                                      layout=left_layout, 
                                      write_function = self.setReconstructor) 
         # Fill bottom-right layout    
-        self.carrier_idx = Setting('Carrier index', dtype=int, initial=0,
+        self.carrier_idx = Setting('carrier index', dtype=int, initial=0,
                                    layout=right_layout, vmin = 0,
                                    write_function = self.show_xcorr
                                    )
