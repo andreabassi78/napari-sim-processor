@@ -1,48 +1,36 @@
 """
-Created on Tue Jan 25 16:34:41 2022
+Created on Sun May 22 20:27:41 2022
 
+@author: andrea
+"""
+
+"""
+Created on Tue Jan 25 16:34:41 2022
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from napari_sim_processor.widget_settings import Setting, Combo_box, add_timer
+from napari_sim_processor.widget_settings import Setting
 from napari_sim_processor.baseSimProcessor import pytorch, cupy
 from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
-# from napari_sim_processor.simProcessor import SimProcessor
+from napari_sim_processor.simProcessor import SimProcessor
 import napari
-from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
-from qtpy.QtCore import Qt
+from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton, QComboBox, QLineEdit
 from napari.layers import Image
 import numpy as np
 from napari.qt.threading import thread_worker
 from magicgui.widgets import FunctionGui
 from magicgui import magicgui, magic_factory
 import warnings
+import enum
 import time
 from superqt.utils import qthrottled
-from enum  import Enum
 
 
-class Sim_modes(Enum):
-    SIM = 1
-    HEXSIM = 2
+class accel(enum.Enum):
+    USENUMPY = 1
+    USETORCH = 2
+    USECUPY = 3
 
-
-class Accel(Enum):
-    USE_NUMPY = 1
-    USE_TORCH = 5 #TODO set back to 2 after complete testing
-    USE_CUPY = 3 
-    
-    @classmethod
-    def available(cls):
-        '''
-        Returns a new Enum with the available cpu/gpu accelerations 
-        '''
-        available_list = [cls.USE_NUMPY]
-        if pytorch: available_list.append(cls.USE_TORCH),
-        if cupy: available_list.append(cls.USE_CUPY) 
-        available_members = {member.name:member.value for member in available_list}
-        return Enum('AvailableAccel', available_members)
-    
 
 def reshape_init(reshape_widget: FunctionGui):
     @reshape_widget.input_image.changed.connect
@@ -120,7 +108,7 @@ def reshape(viewer: napari.Viewer,
             raise(ValueError('Input stack order reshaping not implemented'))
         input_image.data = rdata
         viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
-        viewer.dims.set_point(axis=[0,1,2], value=[0,0,0]) #raises ValueError in napari versions <0.4.13 
+        viewer.dims.set_point(axis=[0,1,2], value=[0,0,0]) #TODO  check why this is raising ValueError sistematically 
 
 
 class SimAnalysis(QWidget):
@@ -144,12 +132,14 @@ class SimAnalysis(QWidget):
         self.start_sim_processor()
         self.viewer.dims.events.current_step.connect(self.on_step_change)
         
-        
     def setup_ui(self):     
+        
         def add_section(_layout):
+            from qtpy.QtCore import Qt
             splitter = QSplitter(Qt.Vertical)
             _layout.addWidget(splitter)
             #_layout.addWidget(QLabel(_title))
+            
         # initialize layout
         layout = QVBoxLayout()
         self.setLayout(layout)
@@ -162,10 +152,8 @@ class SimAnalysis(QWidget):
         right_layout = QVBoxLayout()
         bottom_layout.addLayout(right_layout)
         # Fill top layout
-        self.add_magic_function(self.select_layer, top_layout)
+        self.add_magic_layer_selection(top_layout)
         # Fill bottom-left layout
-        self.sim_mode = Combo_box(name = 'Mode', choices = Sim_modes, layout=left_layout,
-                                  write_function = self.reset_processor)
         self.phases_number = Setting('phases', dtype=int, initial=7, layout=left_layout, 
                               write_function = self.reset_processor)
         self.angles_number = Setting('angles', dtype=int, initial=1, layout=left_layout, 
@@ -207,27 +195,27 @@ class SimAnalysis(QWidget):
         # Fill bottom-right layout    
         self.carrier_idx = Setting('carrier index', dtype=int, initial=0,
                                    layout=right_layout, vmin = 0,
-                                   write_function = self.show_functions
+                                   write_function = self.show_xcorr
                                    )
         self.showXcorr = Setting('Show Xcorr', dtype=bool, initial=False,
                                      layout=right_layout,
-                                     write_function = self.show_functions
+                                     write_function = self.show_xcorr
                                      )
         self.showSpectrum = Setting('Show Spectrum', dtype=bool, initial=False,
                                      layout=right_layout,
-                                     write_function = self.show_functions
+                                     write_function = self.show_spectrum
                                      )
         self.showWiener = Setting('Show Wiener filter', dtype=bool, initial=False,
                                      layout=right_layout,
-                                     write_function = self.show_functions
+                                     write_function = self.show_wiener
                                      )
         self.showEta = Setting('Show Eta circle', dtype=bool, initial=False,
                                      layout=right_layout,
-                                     write_function = self.show_functions
+                                     write_function = self.show_eta
                                      )
         self.showCarrier = Setting('Show Carrier', dtype=bool, initial=False,
                                      layout=right_layout,
-                                     write_function = self.show_functions
+                                     write_function = self.show_carrier
                                      )
         self.keep_calibrating = Setting('Continuos Calibration', dtype=bool, initial=False,
                                      layout=right_layout, 
@@ -235,11 +223,15 @@ class SimAnalysis(QWidget):
         self.batch = Setting('Batch Reconstruction', dtype=bool, initial=False,
                                      layout=right_layout, 
                                      write_function = self.setReconstructor)
-        # creates the cpu/gpu acceleration combobox with only the availbale ones
-        self.proc = Combo_box(name = 'Accel', choices = Accel.available(),
-                                  layout=right_layout,
-                                  write_function = self.reset_processor)    
-        # buttons
+
+        self.proc = QComboBox()
+        self.proc.addItem('Use Numpy', userData=accel.USENUMPY)
+        if pytorch:
+            self.proc.addItem('Use PyTorch', userData=accel.USETORCH)
+        if cupy:
+            self.proc.addItem('Use CuPy', userData=accel.USECUPY)
+        right_layout.addWidget(self.proc)
+
         buttons_dict = {'Widefield': self.calculate_WF_image,
                         'Calibrate': self.calibration,
                         'Plot calibration phases':self.find_phaseshifts,
@@ -251,16 +243,16 @@ class SimAnalysis(QWidget):
             button = QPushButton(button_name)
             button.clicked.connect(call_function)
             right_layout.addWidget(button)
+
         self.messageBox = QLineEdit()
         layout.addWidget(self.messageBox, stretch=True)
         self.messageBox.setText('Messages')
-    
         
-    def add_magic_function(self, function, _layout):
+    def add_magic_layer_selection(self,_layout):
+        function = self.select_layer
         self.viewer.layers.events.inserted.connect(function.reset_choices)
         self.viewer.layers.events.removed.connect(function.reset_choices)
         _layout.addWidget(function.native)
-        
     
     @magicgui(call_button='Select image layer')    
     def select_layer(self, image: Image):
@@ -289,23 +281,15 @@ class SimAnalysis(QWidget):
         self.viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
         self.rescaleZ()
         self.center_stack(image)
-        self.move_layer_to_top(image)
-        self.reset_processor()
-        print(f'Selected image layer: {image.name}')
-    
-    
-    def reset_processor(self,*args):
-        '''
-        Reset the processor and starts it (stops it if existing). 
-        Disables xcorr,spectrum and circle.
-        ''' 
         self.start_sim_processor()
+        self.move_layer_to_top(image)
         self.showXcorr.val = False
-        self.showWiener.val = False
         self.showSpectrum.val = False
         self.showEta.val = False
         self.showCarrier.val = False
         self.keep_calibrating.val = False
+        #self.keep_reconstructing.val = False
+        print(f'Selected image layer: {image.name}')
         
             
     def rescaleZ(self):
@@ -332,15 +316,19 @@ class SimAnalysis(QWidget):
                 current_step[dim_idx] = data.shape[dim_idx]//2
             self.viewer.dims.current_step = current_step                
            
-            
     @qthrottled (timeout=10)
     def on_step_change(self, *args):   
         if hasattr(self, 'imageRaw_name'):
             t0 = time.time()
             self.setReconstructor()
+            self.show_spectrum()
+            self.show_xcorr()
             min_timeout = 10 #ms
             delta_t = time.time() - t0
-            self.on_step_change.set_timeout(delta_t + min_timeout)
+            self.set_timeout(delta_t + min_timeout)
+
+    def set_timeout(self, new_timeout):
+        self.on_step_change.set_timeout(new_timeout)
 
 
     def show_image(self, image_values, im_name, **kwargs):
@@ -367,7 +355,7 @@ class SimAnalysis(QWidget):
                                             colormap = colormap,
                                             interpolation = 'bilinear')
         self.center_stack(image_values)
-        # self.move_layer_to_top(layer)
+        self.move_layer_to_top(layer)
         if kwargs.get('autoscale') is True:
             layer.reset_contrast_limits()
         return layer
@@ -433,7 +421,6 @@ class SimAnalysis(QWidget):
         stack = fullstack[:,:,z_index,:,:]
         return stack
     
-    
     def get_current_stack_for_calibration(self):
         '''
         Returns the 4D raw image (angles,phases,y,x) stack at the z value selected in the viewer  
@@ -469,34 +456,41 @@ class SimAnalysis(QWidget):
         ''''
         Creates an instance of the Processor
         '''
-        if self.is_image_in_layers():
-            self.isCalibrated = False
-            if hasattr(self, 'h'):
-                self.stop_sim_processor()
-                self.start_sim_processor()
-            else:
-                if self.sim_mode.current_data == Sim_modes.HEXSIM.value:  
-                    self.h = HexSimProcessor()  
-                    k_shape = (3,1)
-                elif self.sim_mode.current_data == Sim_modes.SIM.value and self.phases_number.val >= 3 and self.angles_number.val > 0:
-                    self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
-                                              phaseSteps=self.phases_number.val)
-                    k_shape = (self.angles_number.val,1)   
-                else: 
-                    raise(ValueError("Invalid phases or angles number"))
-                self.carrier_idx.set_min_max(0,k_shape[0]-1)
-                self.h.debug = False
-                self.setReconstructor() 
-                self.kx_input = np.zeros(k_shape, dtype=np.single)
-                self.ky_input = np.zeros(k_shape, dtype=np.single)
-                self.p_input = np.zeros(k_shape, dtype=np.single)
-                self.ampl_input = np.zeros(k_shape, dtype=np.single)
+        self.isCalibrated = False
+        if hasattr(self, 'h'):
+            self.stop_sim_processor()
+            self.start_sim_processor()
+        else:
+            if self.phases_number.val == 3 and self.angles_number.val == 1: 
+                self.h = SimProcessor()  
+                k_shape = (1,1)
+            elif self.phases_number.val == 7:  
+                self.h = HexSimProcessor()  
+                k_shape = (3,1)
+            elif self.phases_number.val >= 3 and self.angles_number.val > 0:
+                self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
+                                          phaseSteps=self.phases_number.val)
+                k_shape = (self.angles_number.val,1)
+            else: 
+                raise(ValueError("Invalid phases or angles number"))
+            self.h.debug = False
+            self.setReconstructor() 
+            self.kx_input = np.zeros(k_shape, dtype=np.single)
+            self.ky_input = np.zeros(k_shape, dtype=np.single)
+            self.p_input = np.zeros(k_shape, dtype=np.single)
+            self.ampl_input = np.zeros(k_shape, dtype=np.single)
 
             
     def stop_sim_processor(self):
         if hasattr(self, 'h'):
             delattr(self, 'h')
-
+  
+    
+    def reset_processor(self,*args):
+        self.isCalibrated = False
+        self.stop_sim_processor()
+        self.start_sim_processor()
+       
     
     def setReconstructor(self,*args):
         '''
@@ -519,9 +513,12 @@ class SimAnalysis(QWidget):
                 self.h.ky = self.ky_input
             if self.keep_calibrating.val:
                 self.calibration()
-            self.show_functions()
+            # if self.keep_reconstructing.val:
+            #     self.single_plane_reconstruction()
+            if self.showEta.val:
+                self.show_eta()
           
-           
+            
     def show_wiener(self, *args):
         """
         Shows the Wiener filter 
@@ -534,10 +531,12 @@ class SimAnalysis(QWidget):
                 swy,swx = img.shape
                 self.show_image(img[swy//2-swy//4:swy//2+swy//4,swx//2-swx//4:swx//2+swx//4],
                                 imname, hold = True, scale=[1,1])
+                self.show_carrier()
+                self.show_eta()
             elif not self.showWiener.val and imname in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[imname])
                        
-       
+            
     def show_spectrum(self, *args):
         """
         Calculates and shows the power spectrum of the image
@@ -550,10 +549,12 @@ class SimAnalysis(QWidget):
                 epsilon = 1e-10
                 ps = np.log((np.abs(fftshift(fft2(img0))))**2+epsilon)
                 self.show_image(ps, imname, hold = True)
+                self.show_carrier()
+                self.show_eta()
             elif not self.showSpectrum.val and imname in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[imname])
        
-    
+     
     def show_xcorr(self, *args):
         """
         Show the crosscorrelation of the low and high pass filtered version of the raw images,
@@ -564,13 +565,13 @@ class SimAnalysis(QWidget):
             if self.showXcorr.val and hasattr(self,'h'):
                 im = self.get_current_stack_for_calibration()
                 # choose the gpu acceleration
-                if self.proc.current_data == Accel.USE_TORCH.value:
+                if self.proc.currentData() == accel.USETORCH:
                     ixf = np.squeeze(self.h.crossCorrelations_pytorch(im))
-                elif self.proc.current_data == Accel.USE_CUPY.value:
+                elif self.proc.currentData() == accel.USECUPY:
                     ixf = np.squeeze(self.h.crossCorrelations_cupy(im))
                 else:
                     ixf = np.squeeze(self.h.crossCorrelations(im))
-                # show the selected carrier
+                # show the slected carrier
                 if ixf.ndim >2:
                     carriers_number = ixf.shape[0]
                     self.carrier_idx.set_min_max(0,carriers_number-1)
@@ -580,16 +581,11 @@ class SimAnalysis(QWidget):
                     self.carrier_idx.set_min_max(0,0)
                 self.show_image(ixf, imname, hold = True,
                                 colormap ='twilight', autoscale = True)
+                self.show_carrier()
+                self.show_eta()
             elif not self.showXcorr.val and imname in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[imname])
-    
-    def show_functions(self, *args):
-        self.show_wiener()
-        self.show_spectrum()
-        self.show_xcorr()
-        self.show_carrier()
-        self.show_eta()
-        
+            
      
     def calculate_kr(self,N):  
         '''
@@ -607,14 +603,14 @@ class SimAnalysis(QWidget):
         cutoff_in_pixels = cutoff / dk
         return cutoff_in_pixels, dk   
       
-     
+      
     def show_carrier(self, *args):
         '''
         Draws the carrier frenquencies in a shape layer
         '''
-        if self.is_image_in_layers() :
+        if self.is_image_in_layers() and self.isCalibrated:
             name = f'carrier_{self.imageRaw_name}'
-            if self.showCarrier.val and self.isCalibrated:
+            if self.showCarrier.val:
                 N = self.h.N
                 cutoff, dk = self.calculate_kr(N)
                 kxs = self.h.kx
@@ -624,8 +620,7 @@ class SimAnalysis(QWidget):
                     pc[idx,0] = ky[0] / dk + N/2
                     pc[idx,1] = kx[0] / dk + N/2
                 radius = self.h.N // 30 # radius of the displayed circle 
-                layer=self.add_circles(pc, radius, name, color='red')
-                self.move_layer_to_top(layer) 
+                self.add_circles(pc, radius, name, color='red')
                 # kr = np.sqrt(kxs**2+kys**2)
                 # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
             elif name in self.viewer.layers:
@@ -643,18 +638,16 @@ class SimAnalysis(QWidget):
                 N = self.h.N
                 cutoff, dk   = self.calculate_kr(N)  
                 eta_radius = 1.9 * self.h.eta * cutoff
-                layer=self.add_circles(np.array([N/2,N/2]), eta_radius,
+                self.add_circles(np.array([N/2,N/2]), eta_radius,
                                name, color='green')
-                layer=self.add_circles(np.array([N/2,N/2]), 2 * cutoff,
+                self.add_circles(np.array([N/2,N/2]), 2 * cutoff,
                                name, color='blue', hold=True)
-                self.move_layer_to_top(layer) 
-            
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])
 
-    
     def add_circles(self, locations, radius=20,
-                    shape_name='shapename', color='blue', hold=False):
+                    shape_name='shapename', color='blue', hold=False
+                    ):
         '''
         Creates a circle in a layer with yx coordinates speciefied in each row of locations
         
@@ -686,16 +679,14 @@ class SimAnalysis(QWidget):
             if hold:
                 circles_layer.add_ellipses(ellipses, edge_color=color)
             else:
-                circles_layer.data = np.array(ellipses) 
+                circles_layer.data = np.array(ellipses)
         else:  
             circles_layer = self.viewer.add_shapes(name=shape_name,
                                    edge_width = 1.3,
                                    face_color = [1,1,1,0],
                                    edge_color = color)
             circles_layer.add_ellipses(ellipses, edge_color=color)
-        return circles_layer
-            
-        
+        self.move_layer_to_top(circles_layer)   
     
     
     def showCalibrationTable(self):
@@ -719,9 +710,9 @@ class SimAnalysis(QWidget):
         phases_angles = sa*sp
         pa_stack = fullstack.reshape(phases_angles, sz, sy, sx)
         paz_stack = np.swapaxes(pa_stack, 0, 1).reshape((phases_angles*sz, sy, sx))
-        if self.proc.current_data == Accel.USE_TORCH.value:
+        if self.proc.currentData() == accel.USETORCH:
             demodulation_function = self.h.filteredOSreconstruct_pytorch
-        elif self.proc.current_data == Accel.USE_CUPY.value:
+        elif self.proc.currentData() == accel.USECUPY:
             demodulation_function = self.h.filteredOSreconstruct_cupy
         else:
             demodulation_function = self.h.filteredOSreconstruct
@@ -756,9 +747,9 @@ class SimAnalysis(QWidget):
         if hasattr(self, 'h'):
             imRaw = self.get_current_stack_for_calibration()
             start_time = time.time()
-            if self.proc.current_data == Accel.USE_TORCH.value:
+            if self.proc.currentData() == accel.USETORCH:
                 self.h.calibrate_pytorch(imRaw,self.find_carrier.val)
-            elif self.proc.current_data == Accel.USE_CUPY.value:
+            elif self.proc.currentData() == accel.USECUPY:
                 self.h.calibrate_cupy(imRaw, self.find_carrier.val)
             else:
                 self.h.calibrate(imRaw,self.find_carrier.val)
@@ -770,7 +761,10 @@ class SimAnalysis(QWidget):
                 self.ky_input = self.h.ky
                 self.p_input = self.h.p
                 self.ampl_input = self.h.ampl 
-            self.show_functions()
+            self.show_wiener()
+            self.show_xcorr()
+            self.show_carrier()
+            self.show_eta()
             
                    
     def single_plane_reconstruction(self):
@@ -782,9 +776,9 @@ class SimAnalysis(QWidget):
         dshape= current_image.shape
         phases_angles = self.phases_number.val*self.angles_number.val
         rdata = current_image.reshape(phases_angles, dshape[-2],dshape[-1])
-        if self.proc.current_data == Accel.USE_TORCH.value:
+        if self.proc.currentData() == accel.USETORCH:
             imageSIM = self.h.reconstruct_pytorch(rdata.astype(np.float32)) #TODO:this is left after conversion from torch
-        elif self.proc.current_data == Accel.USE_CUPY.value:
+        elif self.proc.currentData() == accel.USECUPY:
             imageSIM = self.h.reconstruct_cupy(rdata.astype(np.float32))  # TODO:this is left after conversion from torch
         else:
             imageSIM = self.h.reconstruct_rfftw(rdata)
@@ -820,15 +814,15 @@ class SimAnalysis(QWidget):
                         data = pa_stack[:,zmin:zmax,:,:]
                         s_pa = data.shape[0]
                         selected_imRaw = np.swapaxes(data, 0, 1).reshape((s_pa * new_delta, sy, sx))
-                        if self.proc.current_data == Accel.USE_TORCH.value:
+                        if self.proc.currentData() == accel.USETORCH:
                             self.h.calibrate_pytorch(selected_imRaw,self.find_carrier.val)
-                        elif self.proc.current_data == Accel.USE_CUPY.value:
+                        elif self.proc.currentData() == accel.USECUPY:
                             self.h.calibrate_cupy(selected_imRaw, self.find_carrier.val)
                         else:
                             self.h.calibrate(selected_imRaw,self.find_carrier.val)                
-                if self.proc.current_data == Accel.USE_TORCH.value:
+                if self.proc.currentData() == accel.USETORCH:
                     stackSIM[zidx,:,:] = self.h.reconstruct_pytorch(phases_stack.astype(np.float32)) #TODO:this is left after conversion from torch
-                elif self.proc.current_data == Accel.USE_CUPY.value:
+                elif self.proc.currentData() == accel.USECUPY:
                     stackSIM[zidx, :, :] = self.h.reconstruct_cupy(phases_stack.astype(np.float32))  # TODO:this is left after conversion from torch
                 else:
                     stackSIM[zidx,:,:] = self.h.reconstruct_rfftw(phases_stack)      
@@ -838,9 +832,9 @@ class SimAnalysis(QWidget):
         def _batch_reconstruction():
             warnings.filterwarnings('ignore')
             start_time = time.time()
-            if self.proc.current_data == Accel.USE_TORCH.value:
+            if self.proc.currentData() == accel.USETORCH:
                 stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize = 32)
-            elif self.proc.current_data == Accel.USE_CUPY.value:
+            elif self.proc.currentData() == accel.USECUPY:
                 stackSIM = self.h.batchreconstructcompact_cupy(paz_stack, blocksize=32)
             else:
                 stackSIM = self.h.batchreconstructcompact(paz_stack)
@@ -863,9 +857,9 @@ class SimAnalysis(QWidget):
           
     def find_phaseshifts(self):
         assert self.isCalibrated, 'SIM processor not calibrated, unable to show phases'
-        if self.sim_mode.current_data == Sim_modes.HEXSIM.value:
+        if self.phases_number.val==7:
             self.find_hexsim_phaseshifts()
-        elif self.sim_mode.current_data == Sim_modes.SIM.value:
+        elif self.phases_number.val==3 or self.phases_number.val==5 : #TODO make more general with combobox
             self.find_sim_phaseshifts()
         
         
@@ -877,9 +871,9 @@ class SimAnalysis(QWidget):
         sa,sp,sy,sx = stack.shape
         img = stack.reshape(sa*sp, sy, sx) 
         for i in range (3):
-            if self.proc.current_data == Accel.USE_TORCH.value:
+            if self.proc.currentData() == accel.USETORCH:
                 phase, _ = self.h.find_phase_pytorch(self.h.kx[i], self.h.ky[i], img)
-            elif self.proc.current_data == Accel.USE_CUPY.value:
+            elif self.proc.currentData() == accel.USECUPY:
                 phase, _ = self.h.find_phase_cupy(self.h.kx[i], self.h.ky[i], img)
             else:
                 phase, _ = self.h.find_phase(self.h.kx[i], self.h.ky[i], img)
@@ -901,9 +895,9 @@ class SimAnalysis(QWidget):
             phaseshift = np.zeros((sp,sa))
             expected_phase = np.zeros((sp,sa))
             error = np.zeros((sp,sa))
-            if self.proc.current_data == Accel.USE_TORCH.value:
+            if self.proc.currentData() == accel.USETORCH:
                 phase, _ = self.h.find_phase_pytorch(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
-            elif self.proc.current_data == Accel.USE_CUPY.value:
+            elif self.proc.currentData() == accel.USECUPY:
                 phase, _ = self.h.find_phase_cupy(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
             else:
                 phase, _ = self.h.find_phase(self.h.kx[angle_idx], self.h.ky[angle_idx], img)
