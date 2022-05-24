@@ -688,14 +688,14 @@ class SimAnalysis(QWidget):
         if shape_name in self.viewer.layers: 
             circles_layer = self.viewer.layers[shape_name]
             if hold:
-                circles_layer.add_ellipses(np.array(ellipses), edge_color=color)
+                circles_layer.add_ellipses(ellipses, edge_color=color)
             else:
-                circles_layer.data = np.array(ellipses) 
+                circles_layer.data = ellipses
         else:  
             circles_layer = self.viewer.add_shapes(name=shape_name,
                                    edge_width = 1.3,
                                    face_color = [1, 1, 1, 0])
-            circles_layer.add_ellipses(np.array(ellipses), edge_color=color)
+            circles_layer.add_ellipses(ellipses, edge_color=color)
         return circles_layer
     
     
