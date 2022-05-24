@@ -484,7 +484,7 @@ class SimAnalysis(QWidget):
                     k_shape = (self.angles_number.val,1)   
                 else: 
                     raise(ValueError("Invalid phases or angles number"))
-                self.carrier_idx.set_min_max(0,k_shape[0]-1)
+                self.carrier_idx.set_min_max(0,k_shape[0]-1) # TODO connect carrier idx to angle if Sim_mode == SIM
                 self.h.debug = False
                 self.setReconstructor() 
                 self.kx_input = np.zeros(k_shape, dtype=np.single)
@@ -565,15 +565,13 @@ class SimAnalysis(QWidget):
                 im = self.get_current_stack_for_calibration()
                 # choose the gpu acceleration
                 if self.proc.current_data == Accel.USE_TORCH.value:
-                    ixf = np.squeeze(self.h.crossCorrelations_pytorch(im))
+                    ixf = np.squeeze(self.h.crossCorrelations_pytorch(im)) #TODO check if traspose should be added
                 elif self.proc.current_data == Accel.USE_CUPY.value:
                     ixf = np.squeeze(self.h.crossCorrelations_cupy(im))
                 else:
                     ixf = np.squeeze(self.h.crossCorrelations(im))
                 # show the selected carrier
                 if ixf.ndim >2:
-                    carriers_number = ixf.shape[0]
-                    self.carrier_idx.set_min_max(0,carriers_number-1)
                     carrier_idx = self.carrier_idx.val
                     ixf =ixf [carrier_idx,:,:]   
                 else:
@@ -630,8 +628,8 @@ class SimAnalysis(QWidget):
                 # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])
-                
-           
+    
+                   
     def show_eta(self):
         '''
         Shows two circles with radius eta (green circle), 
@@ -640,6 +638,7 @@ class SimAnalysis(QWidget):
         if self.is_image_in_layers():
             name = f'eta_circle_{self.imageRaw_name}'
             if self.showEta.val:
+                
                 N = self.h.N
                 cutoff, dk   = self.calculate_kr(N)  
                 eta_radius = 1.9 * self.h.eta * cutoff
@@ -650,7 +649,7 @@ class SimAnalysis(QWidget):
                 self.move_layer_to_top(layer) 
             
             elif name in self.viewer.layers:
-                self.remove_layer(self.viewer.layers[name])
+                self.remove_layer(self.viewer.layers[name])   
 
     
     def add_circles(self, locations, radius=20,
