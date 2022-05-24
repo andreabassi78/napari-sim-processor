@@ -618,11 +618,12 @@ class SimAnalysis(QWidget):
                 kxs = self.h.kx
                 kys = self.h.ky
                 pc = np.zeros((len(kxs),2))
+                radii = []
                 for idx, (kx,ky) in enumerate(zip(kxs,kys)):
                     pc[idx,0] = ky[0] / dk + N/2
                     pc[idx,1] = kx[0] / dk + N/2
-                radius = self.h.N // 30 # radius of the displayed circle 
-                layer=self.add_circles(pc, radius, name, color='red')
+                    radii.append(self.h.N // 30) # radius of the displayed circle
+                layer=self.add_circles(pc, radii, name, color='red')
                 self.move_layer_to_top(layer) 
                 # kr = np.sqrt(kxs**2+kys**2)
                 # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
@@ -637,22 +638,26 @@ class SimAnalysis(QWidget):
         '''
         if self.is_image_in_layers():
             name = f'eta_circle_{self.imageRaw_name}'
+            centres = []
+            radii = []
+            colors = []
             if self.showEta.val:
-                
                 N = self.h.N
                 cutoff, dk   = self.calculate_kr(N)  
                 eta_radius = 1.9 * self.h.eta * cutoff
-                layer=self.add_circles(np.array([N/2,N/2]), eta_radius,
-                               name, color='green')
-                layer=self.add_circles(np.array([N/2,N/2]), 2 * cutoff,
-                               name, color='blue', hold=True)
-                self.move_layer_to_top(layer) 
-            
+                centres.append(np.array([N/2,N/2]))
+                radii.append(eta_radius)
+                colors.append('green')
+                centres.append(np.array([N/2,N/2]))
+                radii.append(2 * cutoff)
+                colors.append('blue')
+                layer=self.add_circles(centres, radii, shape_name=name, color=colors)
+                self.move_layer_to_top(layer)
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])   
 
     
-    def add_circles(self, locations, radius=20,
+    def add_circles(self, locations, radii,
                     shape_name='shapename', color='blue', hold=False):
         '''
         Creates a circle in a layer with yx coordinates speciefied in each row of locations
@@ -663,38 +668,35 @@ class SimAnalysis(QWidget):
             yx coordinates of the centers. 
         shape_name : str
             name of the new Shape
-        radius : int 
-            radius of the circles.
-        color : str of RGBA list
+        radii : int
+            radii of the circles.
+        color : list of or single instance of str or RGBA list
             color of the circles.
         hold : bool
             if True updates the existing layer, with name shape_name,
             without creating a new layer
         '''
         ellipses = []
-        for center in locations: 
-            bbox = np.array([center+np.array([radius, radius]),
-                             center+np.array([radius,-radius]),
-                             center+np.array([-radius,-radius]),
-                             center+np.array([-radius, radius])]
+        for center, radius in zip(locations, radii):
+            bbox = np.array([center + np.array([radius, radius]),
+                             center + np.array([radius, -radius]),
+                             center + np.array([-radius, -radius]),
+                             center + np.array([-radius, radius])]
                             )
             ellipses.append(bbox)
         
         if shape_name in self.viewer.layers: 
             circles_layer = self.viewer.layers[shape_name]
             if hold:
-                circles_layer.add_ellipses(ellipses, edge_color=color)
+                circles_layer.add_ellipses(np.array(ellipses), edge_color=color)
             else:
                 circles_layer.data = np.array(ellipses) 
         else:  
             circles_layer = self.viewer.add_shapes(name=shape_name,
                                    edge_width = 1.3,
-                                   face_color = [1,1,1,0],
-                                   edge_color = color)
-            circles_layer.add_ellipses(ellipses, edge_color=color)
+                                   face_color = [1, 1, 1, 0])
+            circles_layer.add_ellipses(np.array(ellipses), edge_color=color)
         return circles_layer
-            
-        
     
     
     def showCalibrationTable(self):
