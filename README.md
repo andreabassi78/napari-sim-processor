@@ -7,9 +7,9 @@
 [![codecov](https://codecov.io/gh/andreabassi78/napari-sim-processor/branch/main/graph/badge.svg)](https://codecov.io/gh/andreabassi78/napari-sim-processor)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-sim-processor)](https://napari-hub.org/plugins/napari-sim-processor)
 
-A Napari plugin for the reconstruction of Structured Illumination Microscopy (SIM) with GPU acceleration (with pytorch, if installed).
+A Napari plugin for the reconstruction of Structured Illumination Microscopy (SIM) with GPU acceleration (pytorch/cupy if installed).
 Currently supports:    
-   - conventional SIM data with a generic number of angle and phases (typically, 3 angles and 3 phases are used for resolution improvement in 2D)
+   - conventional SIM data with a generic number of angles and phases (typically, 3 angles and 3 phases are used for resolution improvement in 2D, but any combination can be processed by the widget)
    - hexagonal SIM data with 7 phases.
 
 The SIM processing widget accepts image stacks organized in 5D (`angle`,`phase`,`z`,`y`,`x`).
@@ -17,7 +17,7 @@ The SIM processing widget accepts image stacks organized in 5D (`angle`,`phase`,
 The reshape widget can be used to easily reshape the data if they are not organized as 5D (angle,phase,z,y,x).
 Currently only square images are supported (`x`=`y`)
 
-For raw image stacks with multiple z-frames each plane is processed as described here:
+For 3D stacks (raw images) with multiple z-frames, a batch reconstruction method is available, as described here:
 	https://doi.org/10.1098/rsta.2020.0162
         
 Support for 3D SIM with enhanced resolution in all directions is not yet available.

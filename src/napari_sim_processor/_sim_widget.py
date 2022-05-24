@@ -9,7 +9,7 @@ from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
 # from napari_sim_processor.simProcessor import SimProcessor
 import napari
-from qtpy.QtWidgets import QVBoxLayout,QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
+from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
 from qtpy.QtCore import Qt
 from napari.layers import Image
 import numpy as np
