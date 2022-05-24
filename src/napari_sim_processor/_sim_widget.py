@@ -3,7 +3,7 @@ Created on Tue Jan 25 16:34:41 2022
 
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from napari_sim_processor.widget_settings import Setting, Combo_box, add_timer
+from napari_sim_processor.widget_settings import Setting, Combo_box
 from napari_sim_processor.baseSimProcessor import pytorch, cupy
 from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
@@ -29,7 +29,7 @@ class Sim_modes(Enum):
 
 class Accel(Enum):
     USE_NUMPY = 1
-    USE_TORCH = 5 #TODO set back to 2 after complete testing
+    USE_TORCH = 2
     USE_CUPY = 3 
     
     @classmethod
@@ -238,7 +238,7 @@ class SimAnalysis(QWidget):
         # creates the cpu/gpu acceleration combobox with only the availbale ones
         self.proc = Combo_box(name = 'Accel', choices = Accel.available(),
                                   layout=right_layout,
-                                  write_function = self.reset_processor)    
+                                  write_function = self.setReconstructor)    
         # buttons
         buttons_dict = {'Widefield': self.calculate_WF_image,
                         'Calibrate': self.calibration,
@@ -565,7 +565,7 @@ class SimAnalysis(QWidget):
                 im = self.get_current_stack_for_calibration()
                 # choose the gpu acceleration
                 if self.proc.current_data == Accel.USE_TORCH.value:
-                    ixf = np.squeeze(self.h.crossCorrelations_pytorch(im)) #TODO check if traspose should be added
+                    ixf = np.squeeze(self.h.crossCorrelations_pytorch(im)) #TODO check if traspose or flip should be added
                 elif self.proc.current_data == Accel.USE_CUPY.value:
                     ixf = np.squeeze(self.h.crossCorrelations_cupy(im))
                 else:
