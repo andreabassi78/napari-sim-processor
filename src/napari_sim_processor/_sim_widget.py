@@ -808,6 +808,7 @@ class SimAnalysis(QWidget):
         @thread_worker(connect={'returned': update_sim_image})
         def _stack_reconstruction():
             warnings.filterwarnings('ignore')
+            start_time = time.time()
             stackSIM = np.zeros([sz,2*sy,2*sx], dtype=np.single)
             for zidx in range(sz):
                 phases_stack = np.squeeze(pa_stack[:,zidx,:,:])
@@ -833,6 +834,8 @@ class SimAnalysis(QWidget):
                     stackSIM[zidx, :, :] = self.h.reconstruct_cupy(phases_stack.astype(np.float32))  # TODO:this is left after conversion from torch
                 else:
                     stackSIM[zidx,:,:] = self.h.reconstruct_rfftw(phases_stack)      
+            elapsed_time = time.time() - start_time
+            self.messageBox.setText(f'Stack reconstruction time {elapsed_time:.3f}s')
             return stackSIM
         
         @thread_worker(connect={'returned': update_sim_image})
@@ -840,7 +843,7 @@ class SimAnalysis(QWidget):
             warnings.filterwarnings('ignore')
             start_time = time.time()
             if self.proc.current_data == Accel.USE_TORCH.value:
-                stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize = 32)
+                stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize=32)
             elif self.proc.current_data == Accel.USE_CUPY.value:
                 stackSIM = self.h.batchreconstructcompact_cupy(paz_stack, blocksize=32)
             else:
@@ -848,7 +851,7 @@ class SimAnalysis(QWidget):
             elapsed_time = time.time() - start_time
             self.messageBox.setText(f'Batch reconstruction time {elapsed_time:.3f}s')
             return stackSIM
-        
+
         # main function executed here
         assert self.isCalibrated, 'SIM processor not calibrated, unable to perform SIM reconstruction'
         fullstack = self.get_hyperstack()

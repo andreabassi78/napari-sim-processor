@@ -888,7 +888,7 @@ class BaseSimProcessor:
 
             res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
             del img3
-        except RuntimeError as e:
+        except Exception as e:
             # Tidy up GPU memory
             if 'img1' in locals(): del img1
             if 'imf' in locals(): del imf
@@ -896,9 +896,12 @@ class BaseSimProcessor:
             if 'reconfactor_cp' in locals(): del reconfactor_cp
             if 'img2' in locals(): del img2
             if 'img3' in locals(): del img3
-            cp._default_memory_pool.free_all_blocks()
+            cp.get_default_memory_pool().free_all_blocks()
+            print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
+            print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+            print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
             raise e
-        cp._default_memory_pool.free_all_blocks()
+        cp.get_default_memory_pool().free_all_blocks()
         return res
 
     def batchreconstructcompact_pytorch(self, img, blocksize=128):
@@ -931,7 +934,7 @@ class BaseSimProcessor:
             del img2
             postfilter_pt = torch.as_tensor(self._postfilter, device=self.tdev)
             res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.N + 1])).cpu().numpy()
-        except RuntimeError as e:
+        except Exception as e:
             if torch.has_cuda:
                 # Tidy up gpu memory
                 if 'img1' in locals(): del img1
@@ -941,6 +944,9 @@ class BaseSimProcessor:
                 if 'img2' in locals(): del img2
                 if 'img3' in locals(): del img3
                 torch.cuda.empty_cache()
+                print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
+                print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+                print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
                 raise e
         if torch.has_cuda:
             del imf
@@ -990,12 +996,12 @@ class BaseSimProcessor:
         if cupy:
             cp.fft.config.get_plan_cache().set_size(0)
             if self.debug:
-                print(f'\tcupy memory used: {cp._default_memory_pool.used_bytes() / 1e9} GB')
-                print(f'\tcupy memory total: {cp._default_memory_pool.total_bytes() / 1e9} GB')
-            cp._default_memory_pool.free_all_blocks()
+                print(f'\tcupy memory used: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+                print(f'\tcupy memory total: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
+            cp.get_default_memory_pool().free_all_blocks()
             if self.debug:
-                print(f'\tcupy memory used after clearing: {cp._default_memory_pool.used_bytes() / 1e9} GB')
-                print(f'\tcupy memory total after clearing: {cp._default_memory_pool.total_bytes() / 1e9} GB')
+                print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+                print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
 
     def find_phase_pytorch(self, kx, ky, img):
         return self.find_phase(kx, ky, img, useTorch=True)
