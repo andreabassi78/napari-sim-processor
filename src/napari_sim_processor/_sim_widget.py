@@ -3,7 +3,7 @@ Created on Tue Jan 25 16:34:41 2022
 
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from napari_sim_processor.widget_settings import Setting, Combo_box
+from napari_sim_processor.widget_settings import Setting, Combo_box, add_timer
 from napari_sim_processor.baseSimProcessor import pytorch, cupy
 from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
@@ -342,7 +342,7 @@ class SimAnalysis(QWidget):
             delta_t = time.time() - t0
             self.on_step_change.set_timeout(delta_t + min_timeout)
 
-
+   
     def show_image(self, image_values, im_name, **kwargs):
         '''
         creates a new Image layer with image_values as data
@@ -656,7 +656,7 @@ class SimAnalysis(QWidget):
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])   
 
-    
+    @add_timer
     def add_circles(self, locations, radii,
                     shape_name='shapename', color='blue', hold=False):
         '''
