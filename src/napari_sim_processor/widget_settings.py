@@ -109,7 +109,7 @@ class Setting():
             self.get_func = sbox.checkState
             change_func = sbox.stateChanged
         
-        else: raise(TypeError, 'Specified setting type not supported')
+        else: raise(TypeError( 'Specified setting type not supported'))
         
         self.set_func(val)
         if self.write_function is not None:
