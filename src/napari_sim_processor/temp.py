@@ -3,7 +3,7 @@ import numpy as np
 import time
 from skimage.draw import disk
 
-N = 500
+N = 1000
 
 def add_shapes(locations,radii):
     tic = time.time()
@@ -51,8 +51,7 @@ viewer = napari.Viewer()
 viewer.add_image(np.random.random([10,N,N]))
 viewer.dims.events.current_step.connect(add_circles)
 
-
-
+napari.run()
 
 
 
