@@ -656,7 +656,7 @@ class SimAnalysis(QWidget):
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])   
 
-    @add_timer
+    #@add_timer
     def add_circles(self, locations, radii,
                     shape_name='shapename', color='blue', hold=False):
         '''
