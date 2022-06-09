@@ -848,14 +848,8 @@ class BaseSimProcessor:
         # cp._default_memory_pool.free_all_blocks()
         return res
 
-    def batchreconstructcompact_cupy(self, img, blocksize=128):
-        assert cupy, "No CuPy present"
+    def _batchreconstructcompactworker_cupy(self, img, blocksize=128):
         try:
-            # cp.get_default_memory_pool().free_all_blocks()
-            # print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
-            # print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
-            # print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
-
             # Sometimes we are called from a new thread and then the plan_cache needs to be
             # reset to 0 to avoid running out of GPU memory
             cp.fft.config.get_plan_cache().set_size(0)
@@ -893,24 +887,17 @@ class BaseSimProcessor:
             res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
             del img3
         except Exception as e:
-            raise e
-            # Tidy up GPU memory
-        finally:
-            img1 = None
-            imf = None
-            bcarray = None
-            reconfactor_cp = None
-            img2 = None
-            img3 = None
-            print(f'\tcupy memory used before clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
-            print(f'\tcupy memory total before clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
-            cp.get_default_memory_pool().free_all_blocks()
-            print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
-            print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
-            print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
+            res = f'Exception in batchreconstruct_cupy: {e}'
         return res
 
-    def batchreconstructcompact_pytorch(self, img, blocksize=128):
+    def batchreconstructcompact_cupy(self, img, blocksize=128):
+        assert cupy, "No CuPy present"
+        res = self._batchreconstructcompactworker_cupy(img, blocksize=blocksize)
+        cp.get_default_memory_pool().free_all_blocks()
+        assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
+        return res
+
+    def _batchreconstructcompactworker_pytorch(self, img, blocksize=128):
         assert pytorch, "No pytorch present"
         try:
             nim = img.shape[0]
@@ -941,25 +928,15 @@ class BaseSimProcessor:
             postfilter_pt = torch.as_tensor(self._postfilter, device=self.tdev)
             res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.N + 1])).cpu().numpy()
         except Exception as e:
-            if torch.has_cuda:
-                # Tidy up gpu memory
-                if 'img1' in locals(): del img1
-                if 'imf' in locals(): del imf
-                if 'bcarray' in locals(): del bcarray
-                if 'reconfactor_pt' in locals(): del reconfactor_pt
-                if 'img2' in locals(): del img2
-                if 'img3' in locals(): del img3
-                torch.cuda.empty_cache()
-                print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
-                print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
-                print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
-                raise e
+            res = f'Exception in batchreconstruct_pytorch: {e}'
+        return res
+
+    def batchreconstructcompact_pytorch(self, img, blocksize=128):
+        assert pytorch, "No pytorch present"
+        res = self._batchreconstructcompactworker_pytorch(img, blocksize=blocksize)
         if torch.has_cuda:
-            del imf
-            del bcarray
-            del reconfactor_pt
-            del img3
             torch.cuda.empty_cache()
+        assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
         return res
 
     def batchreconstruct_pytorch(self, img):

@@ -843,9 +843,9 @@ class SimAnalysis(QWidget):
             warnings.filterwarnings('ignore')
             start_time = time.time()
             if self.proc.current_data == Accel.USE_TORCH.value:
-                stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize=512)
+                stackSIM = self.h.batchreconstructcompact_pytorch(paz_stack, blocksize=32)
             elif self.proc.current_data == Accel.USE_CUPY.value:
-                stackSIM = self.h.batchreconstructcompact_cupy(paz_stack, blocksize=512)
+                stackSIM = self.h.batchreconstructcompact_cupy(paz_stack, blocksize=32)
             else:
                 stackSIM = self.h.batchreconstructcompact(paz_stack)
             elapsed_time = time.time() - start_time
