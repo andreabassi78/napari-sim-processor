@@ -119,6 +119,7 @@ class BaseSimProcessor:
 
     def _calibrate(self, img, findCarrier=True, useTorch=False, useCupy=False):
         assert len(img) > self._nsteps - 1
+        self.empty_cache()
         self.N = len(img[0, :, :])
         if self.N != self._lastN:
             self._allocate_arrays()
@@ -847,80 +848,95 @@ class BaseSimProcessor:
         # cp._default_memory_pool.free_all_blocks()
         return res
 
+    def _batchreconstructcompactworker_cupy(self, img, blocksize=128):
+        try:
+            # Sometimes we are called from a new thread and then the plan_cache needs to be
+            # reset to 0 to avoid running out of GPU memory
+            cp.fft.config.get_plan_cache().set_size(0)
+            img1 = cp.array(img, dtype=np.float32)
+            nim = img1.shape[0]
+            r = np.mod(nim, self._nsteps)
+            if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+                img1 = cp.concatenate((img1, cp.zeros((self._nsteps - r, self.N, self.N), np.single)))
+                nim = nim + self._nsteps - r
+            nimg = nim // self._nsteps
+            imf = cp.fft.rfft2(img1) * cp.array(self._prefilter[:, 0:self.N // 2 + 1])
+
+            del img1
+
+            img2 = cp.zeros((nim, 2 * self.N, 2 * self.N), dtype=np.single)
+            bcarray = cp.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
+            reconfactor_cp = cp.array(self._reconfactor)
+            for i in range(0, nim, self._nsteps):
+                bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
+                bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
+                                                                            0:self.N // 2 + 1]
+                img2[i:i + self._nsteps, :, :] = cp.fft.irfft2(bcarray) * reconfactor_cp
+
+            del bcarray
+            del reconfactor_cp
+
+            img3 = cp.zeros((nimg, 2 * self.N, 2 * self.N), dtype=np.single)
+            for offs in range(0, 2*self.N - blocksize, blocksize):
+                imf = cp.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
+                img3[:, offs:offs + blocksize, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
+            imf = cp.fft.rfft(img2[:, offs + blocksize:2 * self.N, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
+            img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
+            del img2
+            del imf
+            res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
+            del img3
+        except Exception as e:
+            res = f'Exception in batchreconstruct_cupy: {e}'
+        return res
+
     def batchreconstructcompact_cupy(self, img, blocksize=128):
         assert cupy, "No CuPy present"
-        self.empty_cache()
-        img = cp.array(img, dtype=np.float32)
-        nim = img.shape[0]
-        r = np.mod(nim, self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-            img = cp.concatenate((img, cp.zeros((self._nsteps - r, self.N, self.N), np.single)))
-            nim = nim + self._nsteps - r
-        nimg = nim // self._nsteps
-        imf = cp.fft.rfft2(img) * cp.array(self._prefilter[:, 0:self.N // 2 + 1])
+        res = self._batchreconstructcompactworker_cupy(img, blocksize=blocksize)
+        cp.get_default_memory_pool().free_all_blocks()
+        assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
+        return res
 
-        del img
-        # cp._default_memory_pool.free_all_blocks()
+    def _batchreconstructcompactworker_pytorch(self, img, blocksize=128):
+        assert pytorch, "No pytorch present"
+        try:
+            nim = img.shape[0]
+            r = np.mod(nim, self._nsteps)
+            if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
+                img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), img.dtype)))
+                nim = nim + self._nsteps - r
+            nimg = nim // self._nsteps
+            img1 = torch.as_tensor(np.single(img), dtype=torch.float32, device=self.tdev)
+            imf = torch.fft.rfft2(img1) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)
+            del img1
+            img2 = torch.zeros((nim, 2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
+            bcarray = torch.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=torch.complex64, device=self.tdev)
+            reconfactor_pt = torch.as_tensor(self._reconfactor, device=self.tdev)
+            for i in range(0, nim, self._nsteps):
+                bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
+                bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
+                                                                            0:self.N // 2 + 1]
+                img2[i:i + self._nsteps, :, :] = torch.fft.irfft2(bcarray) * reconfactor_pt
 
-        img2 = cp.zeros((nim, 2 * self.N, 2 * self.N), dtype=np.single)
-        bcarray = cp.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
-        reconfactor_cp = cp.array(self._reconfactor)
-        for i in range(0, nim, self._nsteps):
-            bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-            bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                        0:self.N // 2 + 1]
-            img2[i:i + self._nsteps, :, :] = cp.fft.irfft2(bcarray) * reconfactor_cp
-
-        del bcarray
-        del reconfactor_cp
-        # cp._default_memory_pool.free_all_blocks()
-
-        img3 = cp.zeros((nimg, 2 * self.N, 2 * self.N), dtype=np.single)
-        for offs in range(0, 2*self.N - blocksize, blocksize):
-            imf = cp.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-            img3[:, offs:offs + blocksize, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
-        imf = cp.fft.rfft(img2[:, offs + blocksize:2 * self.N, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-        img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
-        del img2
-        del imf
-        # cp._default_memory_pool.free_all_blocks()
-
-        res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
-        del img3
-        cp._default_memory_pool.free_all_blocks()
-
+            img3 = torch.zeros((nimg, 2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
+            for offs in range(0, 2 * self.N - blocksize, blocksize):
+                imf = torch.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
+                img3[:, offs:offs + blocksize, 0:2 * self.N] = torch.fft.irfft(imf, nimg, 0)
+            imf = torch.fft.rfft(img2[:, offs + blocksize:2 * self.N, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
+            img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = torch.fft.irfft(imf, nimg, 0)
+            del img2
+            postfilter_pt = torch.as_tensor(self._postfilter, device=self.tdev)
+            res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.N + 1])).cpu().numpy()
+        except Exception as e:
+            res = f'Exception in batchreconstruct_pytorch: {e}'
         return res
 
     def batchreconstructcompact_pytorch(self, img, blocksize=128):
         assert pytorch, "No pytorch present"
-        self.empty_cache()
-        nim = img.shape[0]
-        r = np.mod(nim, self._nsteps)
-        if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), img.dtype)))
-            nim = nim + self._nsteps - r
-        nimg = nim // self._nsteps
-        img1 = torch.as_tensor(np.single(img), dtype=torch.float32, device=self.tdev)
-        imf = torch.fft.rfft2(img1) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)
-        del img1
-        img2 = torch.zeros((nim, 2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
-        bcarray = torch.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=torch.complex64, device=self.tdev)
-        reconfactor_pt = torch.as_tensor(self._reconfactor, device=self.tdev)
-        for i in range(0, nim, self._nsteps):
-            bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-            bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                        0:self.N // 2 + 1]
-            img2[i:i + self._nsteps, :, :] = torch.fft.irfft2(bcarray) * reconfactor_pt
-
-        img3 = torch.zeros((nimg, 2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
-        for offs in range(0, 2 * self.N - blocksize, blocksize):
-            imf = torch.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-            img3[:, offs:offs + blocksize, 0:2 * self.N] = torch.fft.irfft(imf, nimg, 0)
-        imf = torch.fft.rfft(img2[:, offs + blocksize:2 * self.N, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-        img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = torch.fft.irfft(imf, nimg, 0)
-        del img2
-        postfilter_pt = torch.as_tensor(self._postfilter, device=self.tdev)
-        res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.N + 1])).cpu().numpy()
+        res = self._batchreconstructcompactworker_pytorch(img, blocksize=blocksize)
+        if torch.has_cuda:
+            torch.cuda.empty_cache()
+        assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
         return res
 
     def batchreconstruct_pytorch(self, img):
@@ -963,12 +979,12 @@ class BaseSimProcessor:
         if cupy:
             cp.fft.config.get_plan_cache().set_size(0)
             if self.debug:
-                print(f'\tcupy memory used: {cp._default_memory_pool.used_bytes() / 1e9} GB')
-                print(f'\tcupy memory total: {cp._default_memory_pool.total_bytes() / 1e9} GB')
-            cp._default_memory_pool.free_all_blocks()
+                print(f'\tcupy memory used: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+                print(f'\tcupy memory total: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
+            cp.get_default_memory_pool().free_all_blocks()
             if self.debug:
-                print(f'\tcupy memory used after clearing: {cp._default_memory_pool.used_bytes() / 1e9} GB')
-                print(f'\tcupy memory total after clearing: {cp._default_memory_pool.total_bytes() / 1e9} GB')
+                print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+                print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
 
     def find_phase_pytorch(self, kx, ky, img):
         return self.find_phase(kx, ky, img, useTorch=True)
