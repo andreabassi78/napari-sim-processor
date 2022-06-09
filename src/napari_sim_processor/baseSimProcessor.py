@@ -851,6 +851,11 @@ class BaseSimProcessor:
     def batchreconstructcompact_cupy(self, img, blocksize=128):
         assert cupy, "No CuPy present"
         try:
+            # cp.get_default_memory_pool().free_all_blocks()
+            # print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
+            # print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+            # print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
+
             # Sometimes we are called from a new thread and then the plan_cache needs to be
             # reset to 0 to avoid running out of GPU memory
             cp.fft.config.get_plan_cache().set_size(0)
@@ -885,23 +890,24 @@ class BaseSimProcessor:
             img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
             del img2
             del imf
-
             res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
             del img3
         except Exception as e:
+            raise e
             # Tidy up GPU memory
-            if 'img1' in locals(): del img1
-            if 'imf' in locals(): del imf
-            if 'bcarray' in locals(): del bcarray
-            if 'reconfactor_cp' in locals(): del reconfactor_cp
-            if 'img2' in locals(): del img2
-            if 'img3' in locals(): del img3
+        finally:
+            img1 = None
+            imf = None
+            bcarray = None
+            reconfactor_cp = None
+            img2 = None
+            img3 = None
+            print(f'\tcupy memory used before clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
+            print(f'\tcupy memory total before clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
             cp.get_default_memory_pool().free_all_blocks()
             print(f'\ttorch cuda memory reserved after clearing: {torch.cuda.memory_reserved() / 1e9} GB')
             print(f'\tcupy memory used after clearing: {cp.get_default_memory_pool().used_bytes() / 1e9} GB')
             print(f'\tcupy memory total after clearing: {cp.get_default_memory_pool().total_bytes() / 1e9} GB')
-            raise e
-        cp.get_default_memory_pool().free_all_blocks()
         return res
 
     def batchreconstructcompact_pytorch(self, img, blocksize=128):
