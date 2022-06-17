@@ -42,8 +42,8 @@ def add_labels(locations,radii):
     print('time to create labels:', time.time()-tic) 
     
 def add_circles(*args):
-    locations = np.random.randint(100,N-100,[4,2])
-    radii = np.random.randint(40,60,4)
+    locations = np.random.randint(200,N-200,[4,2])
+    radii = np.random.randint(200,300,4)
     add_shapes(locations,radii) # takes 90ms on average
     add_labels(locations,radii) # takes 15ms on average
 

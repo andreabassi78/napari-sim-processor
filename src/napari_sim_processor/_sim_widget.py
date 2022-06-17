@@ -3,11 +3,10 @@ Created on Tue Jan 25 16:34:41 2022
 
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from napari_sim_processor.widget_settings import Setting, Combo_box, add_timer
+from napari_sim_processor.widget_settings import Setting, Combo_box
 from napari_sim_processor.baseSimProcessor import pytorch, cupy
 from napari_sim_processor.hexSimProcessor import HexSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
-# from napari_sim_processor.simProcessor import SimProcessor
 import napari
 from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
 from qtpy.QtCore import Qt
@@ -334,14 +333,29 @@ class SimAnalysis(QWidget):
            
             
     @qthrottled (timeout=10)
-    def on_step_change(self, *args):   
-        if hasattr(self, 'imageRaw_name'):
+    def on_step_change(self, *args):
+        if self.is_image_in_layers():
             t0 = time.time()
-            self.setReconstructor()
-            min_timeout = 10 #ms
+            if self.step_changed(0,2,3,4):
+                self.setReconstructor()
             delta_t = time.time() - t0
-            self.on_step_change.set_timeout(delta_t + min_timeout)
+            self.on_step_change.set_timeout(delta_t)
 
+
+    def step_changed(self, *step_indexes):
+        """
+        Returns True if any of the steps with indexes in step_indexes has changed
+        """
+        if not hasattr(self, '_step'):
+            self._step = (0,0,0,0,0)
+        current_step = self.viewer.dims.current_step
+        changed = False
+        for step_idx in step_indexes:
+            if self._step[step_idx] != current_step[step_idx]:
+                changed = True
+        self._step = current_step
+        return changed
+            
    
     def show_image(self, image_values, im_name, **kwargs):
         '''
@@ -497,7 +511,7 @@ class SimAnalysis(QWidget):
         if hasattr(self, 'h'):
             delattr(self, 'h')
 
-    
+   
     def setReconstructor(self,*args):
         '''
         Sets the attributes of the Processor
@@ -581,14 +595,15 @@ class SimAnalysis(QWidget):
             elif not self.showXcorr.val and imname in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[imname])
     
+    
     def show_functions(self, *args):
         self.show_wiener()
         self.show_spectrum()
         self.show_xcorr()
         self.show_carrier()
         self.show_eta()
-        
-     
+
+    
     def calculate_kr(self,N):  
         '''
         Parameter:
@@ -605,7 +620,7 @@ class SimAnalysis(QWidget):
         cutoff_in_pixels = cutoff / dk
         return cutoff_in_pixels, dk   
       
-     
+    
     def show_carrier(self, *args):
         '''
         Draws the carrier frenquencies in a shape layer
@@ -630,7 +645,7 @@ class SimAnalysis(QWidget):
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])
     
-                   
+             
     def show_eta(self):
         '''
         Shows two circles with radius eta (green circle), 
@@ -656,7 +671,7 @@ class SimAnalysis(QWidget):
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])   
 
-    #@add_timer
+
     def add_circles(self, locations, radii,
                     shape_name='shapename', color='blue', hold=False):
         '''
