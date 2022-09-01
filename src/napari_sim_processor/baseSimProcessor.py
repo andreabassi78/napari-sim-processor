@@ -1041,7 +1041,8 @@ class BaseSimProcessor:
         cross_corr_result = xp.sum(p * p0 * xp.outer(
                         phase_shift_to_ypeak, phase_shift_to_xpeak), axis = (1,2)) * scaling
 
-        if self.debug > 1:
+        # if self.debug > 1:
+        if True:
             plt.figure()
             plt.title('Find phase')
             if useTorch:
@@ -1068,6 +1069,7 @@ class BaseSimProcessor:
             plt.figure()
             plt.title('Zoom Find phase')
             plt.imshow(abs(ixfz.squeeze()))
+            plt.show(block=False)
 
         ampl = xp.abs(cross_corr_result) * 2
         phase = xp.angle(cross_corr_result)
@@ -1145,7 +1147,9 @@ class BaseSimProcessor:
 
         band = band0_common * band1_common
 
-        if self.debug:
+        # if self.debug:
+        if True:
+            print('debug in refine carrier')
             ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(band))))
             plt.figure()
             plt.title('Find carrier')
@@ -1155,6 +1159,7 @@ class BaseSimProcessor:
             ax.add_artist(circle)
             circle = plt.Circle((self.N // 2, self.N // 2), radius=2 / self._dk, color='green', fill=False)
             ax.add_artist(circle)
+            plt.show(block=False)
 
         mag = 25 * self.N / 256
         ixfz, Kx, Ky = self._zoomf(band, self.N, np.single(self._k[pxc0]), np.single(self._k[pyc0]), mag , self._dk * self.N)

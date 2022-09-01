@@ -6,6 +6,7 @@ Created on Tue Jan 25 16:34:41 2022
 from napari_sim_processor.widget_settings import Setting, Combo_box
 from napari_sim_processor.baseSimProcessor import pytorch, cupy
 from napari_sim_processor.hexSimProcessor import HexSimProcessor
+from napari_sim_processor.raSimProcessor import RaSimProcessor
 from napari_sim_processor.convSimProcessor import ConvSimProcessor
 import napari
 from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
@@ -24,6 +25,7 @@ from enum  import Enum
 class Sim_modes(Enum):
     SIM = 1
     HEXSIM = 2
+    RASIM = 3
 
 
 class Accel(Enum):
@@ -495,8 +497,11 @@ class SimAnalysis(QWidget):
                 elif self.sim_mode.current_data == Sim_modes.SIM.value and self.phases_number.val >= 3 and self.angles_number.val > 0:
                     self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
                                               phaseSteps=self.phases_number.val)
-                    k_shape = (self.angles_number.val,1)   
-                else: 
+                    k_shape = (self.angles_number.val,1)
+                elif self.sim_mode.current_data == Sim_modes.RASIM.value:
+                    self.h = RaSimProcessor()
+                    k_shape = (2, 1)
+                else:
                     raise(ValueError("Invalid phases or angles number"))
                 self.carrier_idx.set_min_max(0,k_shape[0]-1) # TODO connect carrier idx to angle if Sim_mode == SIM
                 self.h.debug = False
@@ -634,11 +639,16 @@ class SimAnalysis(QWidget):
                 kys = self.h.ky
                 pc = np.zeros((len(kxs),2))
                 radii = []
+                colors = []
                 for idx, (kx,ky) in enumerate(zip(kxs,kys)):
                     pc[idx,0] = ky[0] / dk + N/2
                     pc[idx,1] = kx[0] / dk + N/2
                     radii.append(self.h.N // 30) # radius of the displayed circle
-                layer=self.add_circles(pc, radii, name, color='red')
+                    if idx == self.carrier_idx.val:
+                        colors.append('red')
+                    else:
+                        colors.append('yellow')
+                layer=self.add_circles(pc, radii, name, color=colors)
                 self.move_layer_to_top(layer) 
                 # kr = np.sqrt(kxs**2+kys**2)
                 # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
@@ -884,18 +894,21 @@ class SimAnalysis(QWidget):
         assert self.isCalibrated, 'SIM processor not calibrated, unable to show phases'
         if self.sim_mode.current_data == Sim_modes.HEXSIM.value:
             self.find_hexsim_phaseshifts()
+        if self.sim_mode.current_data == Sim_modes.RASIM.value:
+            self.find_hexsim_phaseshifts()
         elif self.sim_mode.current_data == Sim_modes.SIM.value:
             self.find_sim_phaseshifts()
         
         
-    def find_hexsim_phaseshifts(self):   
-        phaseshift = np.zeros((7,3))
-        expected_phase = np.zeros((7,3))
-        error = np.zeros((7,3))
+    def find_hexsim_phaseshifts(self):
+        nbands = self.h._nbands
+        phaseshift = np.zeros((7,nbands))
+        expected_phase = np.zeros((7,nbands))
+        error = np.zeros((7,nbands))
         stack = self.get_current_ap_stack()
         sa,sp,sy,sx = stack.shape
         img = stack.reshape(sa*sp, sy, sx) 
-        for i in range (3):
+        for i in range (nbands):
             if self.proc.current_data == Accel.USE_TORCH.value:
                 phase, _ = self.h.find_phase_pytorch(self.h.kx[i], self.h.ky[i], img)
             elif self.proc.current_data == Accel.USE_CUPY.value:
@@ -929,7 +942,7 @@ class SimAnalysis(QWidget):
             phase = np.unwrap(phase)
             phase = phase.reshape(sa,sp).T
             expected_phase[:,angle_idx] = np.arange(sp) * 2*np.pi / sp
-            phaseshift= phase-phase[0,:]
+            phaseshift = phase-phase[0,:]
             error = phaseshift-expected_phase      
             data_to_plot = [expected_phase[:,angle_idx], phaseshift[:,angle_idx], error[:,angle_idx]]
             symbols = ['.','o','|']
@@ -967,7 +980,8 @@ class SimAnalysis(QWidget):
         ax.legend(legend, loc='best', frameon = False, fontsize=char_size*0.8)
         ax.grid(True, which='major', axis='both', alpha=0.2)
         vales_num = s[0]
-        ticks = np.linspace(0, vmax*(vales_num-1)/vales_num, 2*vales_num-1 )
+        # ticks = np.linspace(0, vmax*(vales_num-1)/vales_num, 2*vales_num-1 )
+        ticks = np.arange(0, vmax*(vales_num-1)/vales_num, 2 * np.pi / vales_num )
         ax.set_yticks(ticks)
         fig.tight_layout()
         plt.show(block=False)
