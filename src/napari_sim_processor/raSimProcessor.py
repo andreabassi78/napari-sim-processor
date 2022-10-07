@@ -7,8 +7,8 @@ class RaSimProcessor(BaseSimProcessor):
     '''
     Implements hexagonal SIM illumination with three beams, seven phase steps
     '''
-    def __init__(self):
-        self._nsteps = 7
+    def __init__(self,nsteps):
+        self._nsteps = nsteps
         self._nbands = 2
         self.usePhases = False  # can be overridden before calibration
         super().__init__()

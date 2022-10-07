@@ -492,14 +492,14 @@ class SimAnalysis(QWidget):
                 self.start_sim_processor()
             else:
                 if self.sim_mode.current_data == Sim_modes.HEXSIM.value:  
-                    self.h = HexSimProcessor()  
+                    self.h = HexSimProcessor(self.phases_number.val)  
                     k_shape = (3,1)
                 elif self.sim_mode.current_data == Sim_modes.SIM.value and self.phases_number.val >= 3 and self.angles_number.val > 0:
                     self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
                                               phaseSteps=self.phases_number.val)
                     k_shape = (self.angles_number.val,1)
                 elif self.sim_mode.current_data == Sim_modes.RASIM.value:
-                    self.h = RaSimProcessor()
+                    self.h = RaSimProcessor(self.phases_number.val)
                     k_shape = (2, 1)
                 else:
                     raise(ValueError("Invalid phases or angles number"))
@@ -902,9 +902,11 @@ class SimAnalysis(QWidget):
         
     def find_hexsim_phaseshifts(self):
         nbands = self.h._nbands
-        phaseshift = np.zeros((7,nbands))
-        expected_phase = np.zeros((7,nbands))
-        error = np.zeros((7,nbands))
+        nsteps = self.h._nsteps
+        print(nbands)
+        phaseshift = np.zeros((nsteps,nbands))
+        expected_phase = np.zeros((nsteps,nbands))
+        error = np.zeros((nsteps,nbands))
         stack = self.get_current_ap_stack()
         sa,sp,sy,sx = stack.shape
         img = stack.reshape(sa*sp, sy, sx) 
@@ -915,14 +917,16 @@ class SimAnalysis(QWidget):
                 phase, _ = self.h.find_phase_cupy(self.h.kx[i], self.h.ky[i], img)
             else:
                 phase, _ = self.h.find_phase(self.h.kx[i], self.h.ky[i], img)
-            expected_phase[:,i] = np.arange(7) * 2*(i+1) * np.pi / 7
+            expected_phase[:,i] = np.arange(nsteps) * 2*(i+1) * np.pi / nsteps
             phaseshift[:,i] = np.unwrap(phase - phase[0] - expected_phase[:,i]) + expected_phase[:,i]
         error = phaseshift-expected_phase
         data_to_plot = [expected_phase, phaseshift, error]
         symbols = ['.','o','|']
         legend = ['expected', 'measured', 'error']
         self.plot_with_plt(data_to_plot, legend, symbols,
-                                xlabel = 'step', ylabel = 'phase (rad)', vmax = 6*np.pi)
+                                xlabel = 'step', ylabel = 'phase (rad)', 
+                                vmax = np.amax(expected_phase),
+                                ticks_num = nsteps)
             
     
     def find_sim_phaseshifts(self):   
@@ -948,12 +952,16 @@ class SimAnalysis(QWidget):
             symbols = ['.','o','|']
             legend = ['expected', 'measured', 'error']
             self.plot_with_plt(data_to_plot, legend, symbols, title = f'angle {angle_idx}',
-                                    xlabel = 'step', ylabel = 'phase (rad)', vmax = 2*np.pi)
+                                    xlabel = 'step', ylabel = 'phase (rad)',
+                                    vmax = np.amax(expected_phase),
+                                    ticks_num = sp)
                              
     
     def plot_with_plt(self, data_list, legend, symbols,
                       xlabel = 'step', ylabel = 'phase',
-                      vmax = 2*np.pi, title = ''):
+                      vmax = 2*np.pi,
+                      ticks_num = 3 ,
+                      title = ''):
         import matplotlib.pyplot as plt
         char_size = 10
         plt.rc('font', family='calibri', size=char_size)
@@ -979,9 +987,7 @@ class SimAnalysis(QWidget):
         ax.yaxis.set_tick_params(labelsize=char_size*0.75)
         ax.legend(legend, loc='best', frameon = False, fontsize=char_size*0.8)
         ax.grid(True, which='major', axis='both', alpha=0.2)
-        vales_num = s[0]
-        # ticks = np.linspace(0, vmax*(vales_num-1)/vales_num, 2*vales_num-1 )
-        ticks = np.arange(0, vmax*(vales_num-1)/vales_num, 2 * np.pi / vales_num )
+        ticks = np.linspace(0, vmax, ticks_num)
         ax.set_yticks(ticks)
         fig.tight_layout()
         plt.show(block=False)
