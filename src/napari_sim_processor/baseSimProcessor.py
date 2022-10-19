@@ -1108,7 +1108,8 @@ class BaseSimProcessor:
         kx = self._dk * (pxc0 - self.N / 2)
         ky = self._dk * (pyc0 - self.N / 2)
 
-        if self.debug:
+        # if self.debug:
+        if True:
             plt.figure()
             plt.title('Find carrier')
             plt.imshow(ixf, cmap = plt.get_cmap('gray'))
@@ -1152,7 +1153,7 @@ class BaseSimProcessor:
             print('debug in refine carrier')
             ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(band))))
             plt.figure()
-            plt.title('Find carrier')
+            plt.title('Refine carrier')
             plt.imshow(ixf, cmap = plt.get_cmap('gray'))
             ax = plt.gca()
             circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
