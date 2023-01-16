@@ -121,9 +121,10 @@ class BaseSimProcessor:
 
     def _calibrate(self, img, findCarrier=True, useTorch=False, useCupy=False):
         assert len(img) > self._nsteps - 1
-        self.debug = True
         self.empty_cache()
         self.Ny, self.Nx = img[0, :, :].shape
+        assert self.Nx % 2 == 0
+        assert self.Ny % 2 == 0
         if self.Nx != self._lastN[0] and self.Ny != self._lastN[1]:
             self._allocate_arrays()
 
@@ -476,8 +477,8 @@ class BaseSimProcessor:
         oversampling = res / dx
         dkx = oversampling / (Nx / 2)  # Sampling in frequency plane
         dky = oversampling / (Ny / 2)  # Sampling in frequency plane
-        kx = torch.arange(-Nx / 2, Nx / 2, dtype=np.float32, device=self.tdev) * dkx
-        ky = torch.arange(-Ny / 2, Ny / 2, dtype=np.float32, device=self.tdev) * dky
+        kx = torch.arange(-Nx // 2, Nx // 2, dtype=torch.float32, device=self.tdev) * dkx
+        ky = torch.arange(-Ny // 2, Ny // 2, dtype=torch.float32, device=self.tdev) * dky
         kr = torch.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2)
         M = torch.linalg.pinv(torch.as_tensor(self._get_band_construction_matrix(), dtype=torch.complex64, device=self.tdev))
 
@@ -1032,7 +1033,7 @@ class BaseSimProcessor:
         else:
             img = np.float32(img)
             kr = self._kr
-            otf = np.ones((self.Nx, self.Ny), dtype = np.float32)
+            otf = np.ones((self.Ny, self.Nx), dtype = np.float32)
             imgnsum = np.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype = np.single)
             xx = np.arange(-self.Nx / 2 * self._dx, self.Nx / 2 * self._dx, self._dx, dtype=np.double)
             yy = np.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=np.double)
@@ -1074,7 +1075,7 @@ class BaseSimProcessor:
             ax.add_artist(circle)
             mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
             if useTorch:
-                ixfz, Kx, Ky = self._zoomf(p0.cpu().numpy() * p[0, :, :].cpu().numpy(), (self.Ny, self,Nx), np.single(kx), np.single(ky), mag,
+                ixfz, Kx, Ky = self._zoomf(p0.cpu().numpy() * p[0, :, :].cpu().numpy(), (self.Ny, self.Nx), np.single(kx), np.single(ky), mag,
                                        self._dkx * self.Nx)
             elif useCupy:
                 ixfz, Kx, Ky = self._zoomf(p0.get() * p[0, :, :].get(), (self.Ny, self.Nx), np.single(kx), np.single(ky), mag,
@@ -1382,9 +1383,10 @@ class BaseSimProcessor:
         kx = Kx[pxc]
         ky = Ky[pyc]
 
-        xx = torch.arange(-self.N / 2, self.N / 2, dtype=torch.float, device=self.tdev) * self._dx
+        xx = torch.arange(-self.Nx / 2, self.Nx / 2, dtype=torch.float, device=self.tdev) * self._dx
+        yy = torch.arange(-self.Ny / 2, self.Ny / 2, dtype=torch.float, device=self.tdev) * self._dy
         phase_shift_to_xpeak = torch.exp(-1j * kx * xx * 2 * pi * self.NA / self.wavelength)
-        phase_shift_to_ypeak = torch.exp(-1j * ky * xx * 2 * pi * self.NA / self.wavelength)
+        phase_shift_to_ypeak = torch.exp(-1j * ky * yy * 2 * pi * self.NA / self.wavelength)
 
         scaling = 1 / torch.sum(band0_common * torch.conj(band0_common))
 
@@ -1404,7 +1406,7 @@ class BaseSimProcessor:
 
     def _findPeak_pytorch(self, in_array):
         indx = torch.argmax(in_array, axis=None)
-        return torch.div(indx, in_array.shape[0], rounding_mode='floor'), indx % in_array.shape[0]
+        return torch.div(indx, in_array.shape[1], rounding_mode='floor'), indx % in_array.shape[1]
 
     def _zoomf(self, in_arr, M, kx, ky, mag, kmax):
         resy = self._pyczt(in_arr, M[0], exp(-1j * 2 * pi / (mag[0] * M[0])), exp(-1j * pi * (1 / mag[0] - 2 * ky / kmax)))

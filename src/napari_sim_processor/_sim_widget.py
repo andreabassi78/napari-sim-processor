@@ -628,16 +628,18 @@ class SimAnalysis(QWidget):
         if self.is_image_in_layers() :
             name = f'carrier_{self.imageRaw_name}'
             if self.showCarrier.val and self.isCalibrated:
-                N = self.h.N
-                cutoff, dk = self.calculate_kr(N)
+                Nx = self.h.Nx
+                Ny = self.h.Ny
+                cutoff, dkx = self.calculate_kr(Nx)
+                cutoff, dky = self.calculate_kr(Ny)
                 kxs = self.h.kx
                 kys = self.h.ky
                 pc = np.zeros((len(kxs),2))
                 radii = []
                 for idx, (kx,ky) in enumerate(zip(kxs,kys)):
-                    pc[idx,0] = ky[0] / dk + N/2
-                    pc[idx,1] = kx[0] / dk + N/2
-                    radii.append(self.h.N // 30) # radius of the displayed circle
+                    pc[idx,0] = ky[0] / dky + Ny/2
+                    pc[idx,1] = kx[0] / dkx + Nx/2
+                    radii.append(((Nx + Ny) // 60, (Nx + Ny) // 60)) # radius of the displayed circle
                 layer=self.add_circles(pc, radii, name, color='red')
                 self.move_layer_to_top(layer) 
                 # kr = np.sqrt(kxs**2+kys**2)
@@ -657,14 +659,17 @@ class SimAnalysis(QWidget):
             radii = []
             colors = []
             if self.showEta.val:
-                N = self.h.N
-                cutoff, dk   = self.calculate_kr(N)  
-                eta_radius = 1.9 * self.h.eta * cutoff
-                centres.append(np.array([N/2,N/2]))
-                radii.append(eta_radius)
+                Nx = self.h.Nx
+                Ny = self.h.Ny
+                cutoffx, dkx   = self.calculate_kr(Nx)
+                cutoffy, dky   = self.calculate_kr(Ny)
+                eta_radiusx = 1.9 * self.h.eta * cutoffx
+                eta_radiusy = 1.9 * self.h.eta * cutoffy
+                centres.append(np.array([Ny/2,Nx/2]))
+                radii.append((eta_radiusy, eta_radiusx))
                 colors.append('green')
-                centres.append(np.array([N/2,N/2]))
-                radii.append(2 * cutoff)
+                centres.append(np.array([Ny/2,Nx/2]))
+                radii.append((2 * cutoffy, 2 * cutoffx))
                 colors.append('blue')
                 layer=self.add_circles(centres, radii, shape_name=name, color=colors)
                 self.move_layer_to_top(layer)
@@ -693,10 +698,10 @@ class SimAnalysis(QWidget):
         '''
         ellipses = []
         for center, radius in zip(locations, radii):
-            bbox = np.array([center + np.array([radius, radius]),
-                             center + np.array([radius, -radius]),
-                             center + np.array([-radius, -radius]),
-                             center + np.array([-radius, radius])]
+            bbox = np.array([center + np.array([radius[0], radius[1]]),
+                             center + np.array([radius[0], -radius[1]]),
+                             center + np.array([-radius[0], -radius[1]]),
+                             center + np.array([-radius[0], radius[1]])]
                             )
             ellipses.append(bbox)
         
