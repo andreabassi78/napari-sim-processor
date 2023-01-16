@@ -4,6 +4,7 @@ import scipy.ndimage
 import scipy.io
 from numpy import exp, pi, sqrt, log2, arccos
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 try:
     import torch
@@ -44,7 +45,8 @@ except:
     cupy = False
 
 class BaseSimProcessor:
-    N = 256  # points to use in fft
+    Nx = 256  # points to use in fft
+    Ny = 256
     pixelsize = 6.5  # camera pixel size, um
     magnification = 60  # objective magnification
     NA = 1.1        # numerial aperture at sample
@@ -63,7 +65,7 @@ class BaseSimProcessor:
                     # to integers > 1 for extra information
     tdev = None     # torch device to use - if none, then will choose gpu if available and cpu otherwise.
     usePhases = False   # Whether to measure and use individual phases in calibration/reconstruction
-    _lastN = 0      # To track changes in array size that will force array re-allocation
+    _lastN = (0, 0)      # To track changes in array size that will force array re-allocation
     _M = None       # Mand reconstruction matrix
 
     def __init__(self):
@@ -76,35 +78,35 @@ class BaseSimProcessor:
 
     def _allocate_arrays(self):
         """ define matrix """
-        self._reconfactor = np.zeros((self._nsteps, 2 * self.N, 2 * self.N), dtype=np.single)  # for reconstruction
-        self._prefilter = np.zeros((self.N, self.N),
+        self._reconfactor = np.zeros((self._nsteps, 2 * self.Ny, 2 * self.Nx), dtype=np.single)  # for reconstruction
+        self._prefilter = np.zeros((self.Ny, self.Nx),
                                    dtype=np.single)  # for prefilter stage, includes otf and zero order supression
-        self._postfilter = np.zeros((2 * self.N, 2 * self.N), dtype=np.single)
-        self._carray = np.zeros((self._nsteps, 2 * self.N, 2 * self.N), dtype=np.complex64)
-        self._carray1 = np.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
+        self._postfilter = np.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
+        self._carray = np.zeros((self._nsteps, 2 * self.Ny, 2 * self.Nx), dtype=np.complex64)
+        self._carray1 = np.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=np.complex64)
 
-        self._imgstore = np.zeros((self._nsteps, self.N, self.N), dtype=np.single)
-        self._bigimgstore = np.zeros((2 * self.N, 2 * self.N), dtype=np.single)
+        self._imgstore = np.zeros((self._nsteps, self.Ny, self.Nx), dtype=np.single)
+        self._bigimgstore = np.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
         if cupy:
-            self._carray_cp = cp.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
-            self._bigimgstore_cp = cp.zeros((2 * self.N, 2 * self.N), dtype=np.single)
+            self._carray_cp = cp.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=np.complex64)
+            self._bigimgstore_cp = cp.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
         if pytorch:
             if self.tdev is None:
                 if torch.has_cuda:
                     self.tdev = torch.device('cuda')
                 else:
                     self.tdev = torch.device('cpu')
-            self._carray_torch = torch.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=torch.complex64, device=self.tdev)
-            self._bigimgstore_torch = torch.zeros((2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
+            self._carray_torch = torch.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=torch.complex64, device=self.tdev)
+            self._bigimgstore_torch = torch.zeros((2 * self.Ny, 2 * self.Nx), dtype=torch.float32, device=self.tdev)
         if opencv:
-            self._prefilter_ocv = np.zeros((self.N, self.N),
+            self._prefilter_ocv = np.zeros((self.Ny, self.Nx),
                                            dtype=np.single)  # for prefilter stage, includes otf and zero order supression
-            self._postfilter_ocv = np.zeros((2 * self.N, 2 * self.N), dtype=np.single)
-            self._carray_ocv = np.zeros((2 * self.N, 2 * self.N), dtype=np.single)
-            self._carray_ocvU = cv2.UMat((2 * self.N, 2 * self.N), s=0.0, type=cv2.CV_32FC2)
+            self._postfilter_ocv = np.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
+            self._carray_ocv = np.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
+            self._carray_ocvU = cv2.UMat((2 * self.Ny, 2 * self.Nx), s=0.0, type=cv2.CV_32FC2)
             self._bigimgstoreU = cv2.UMat(self._bigimgstore)
-            self._imgstoreU = [cv2.UMat((self.N, self.N), s=0.0, type=cv2.CV_32F) for i in range(7)]
-        self._lastN = self.N
+            self._imgstoreU = [cv2.UMat((self.Ny, self.Nx), s=0.0, type=cv2.CV_32F) for i in range(7)]
+        self._lastN = (self.Nx, self.Ny)
 
     def calibrate(self, img, findCarrier=True):
         self._calibrate(img, findCarrier)
@@ -119,26 +121,32 @@ class BaseSimProcessor:
 
     def _calibrate(self, img, findCarrier=True, useTorch=False, useCupy=False):
         assert len(img) > self._nsteps - 1
+        self.debug = True
         self.empty_cache()
-        self.N = len(img[0, :, :])
-        if self.N != self._lastN:
+        self.Ny, self.Nx = img[0, :, :].shape
+        if self.Nx != self._lastN[0] and self.Ny != self._lastN[1]:
             self._allocate_arrays()
 
         ''' define k grids '''
         self._dx = self.pixelsize / self.magnification  # Sampling in image plane
+        self._dy = self._dx
         self._res = self.wavelength / (2 * self.NA)
         self._oversampling = self._res / self._dx
-        self._dk = self._oversampling / (self.N / 2)  # Sampling in frequency plane
-        self._k = np.arange(-self.N / 2, self.N / 2, dtype=np.double) * self._dk
+        self._dkx = self._oversampling / (self.Nx / 2)  # Sampling in frequency plane
+        self._dky = self._oversampling / (self.Ny / 2)  # Sampling in frequency plane
+        self._kx = np.arange(-self.Nx / 2, self.Nx / 2, dtype=np.double) * self._dkx
+        self._ky = np.arange(-self.Ny / 2, self.Ny / 2, dtype=np.double) * self._dky
         self._dx2 = self._dx / 2
+        self._dy2 = self._dx2
 
-        self._kr = np.sqrt(self._k ** 2 + self._k[:,np.newaxis] ** 2, dtype=np.single)
-        kxbig = np.arange(-self.N, self.N, dtype=np.single) * self._dk
-        kybig = kxbig[:,np.newaxis]
+        self._kr = np.sqrt(self._kx ** 2 + self._ky[:,np.newaxis] ** 2, dtype=np.single)
+        kxbig = np.arange(-self.Nx, self.Nx, dtype=np.single) * self._dkx
+        kybig = np.arange(-self.Ny, self.Ny, dtype=np.single) * self._dky
+        kybig = kybig[:,np.newaxis]
 
         '''Sum input images if there are more than self._nsteps'''
         if len(img) > self._nsteps:
-            imgs = np.zeros((self._nsteps, self.N, self.N), dtype=np.single)
+            imgs = np.zeros((self._nsteps, self.Ny, self.Nx), dtype=np.single)
             for i in range(self._nsteps):
                 imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0, dtype = np.single)
         else:
@@ -147,7 +155,7 @@ class BaseSimProcessor:
         '''Separate bands into DC and high frequency bands'''
         self._M = np.linalg.pinv(self._get_band_construction_matrix())
 
-        wienerfilter = np.zeros((2 * self.N, 2 * self.N), dtype=np.single)
+        wienerfilter = np.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
 
         if useTorch:
             sum_prepared_comp = torch.einsum('ij,jkl->ikl', torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
@@ -249,8 +257,8 @@ class BaseSimProcessor:
 
         ph = np.single(2 * pi * self.NA / self.wavelength)
 
-        xx = np.arange(-self.N, self.N, dtype=np.single) * self._dx2
-        yy = xx
+        xx = np.arange(-self.Nx, self.Nx, dtype=np.single) * self._dx2
+        yy = np.arange(-self.Ny, self.Ny, dtype=np.single) * self._dy2
 
         if useTorch:
             Mcp = torch.as_tensor(self._M, device=self.tdev)
@@ -288,7 +296,7 @@ class BaseSimProcessor:
         self._prefilter = np.single((self._tfm(self._kr, mask2) * self._attm(self._kr, mask2)))
         self._prefilter = fft.fftshift(self._prefilter)
 
-        mtot = np.full((2 * self.N, 2 * self.N), False)
+        mtot = np.full((2 * self.Ny, 2 * self.Nx), False)
 
         thsteps = 361
         th = np.linspace(-pi, pi, thsteps, dtype=np.single)
@@ -367,12 +375,12 @@ class BaseSimProcessor:
         if opencv:
             self._reconfactorU = [cv2.UMat(self._reconfactor[idx_p, :, :]) for idx_p in range(0, self._nsteps)]
             self._prefilter_ocv = np.single(cv2.dft(fft.ifft2(self._prefilter).real))
-            pf = np.zeros((self.N, self.N, 2), dtype=np.single)
+            pf = np.zeros((self.Ny, self.Nx, 2), dtype=np.single)
             pf[:, :, 0] = self._prefilter
             pf[:, :, 1] = self._prefilter
             self._prefilter_ocvU = cv2.UMat(np.single(pf))
             self._postfilter_ocv = np.single(cv2.dft(fft.ifft2(self._postfilter).real))
-            pf = np.zeros((2 * self.N, 2 * self.N, 2), dtype=np.single)
+            pf = np.zeros((2 * self.Ny, 2 * self.Nx, 2), dtype=np.single)
             pf[:, :, 0] = self._postfilter
             pf[:, :, 1] = self._postfilter
             self._postfilter_ocvU = cv2.UMat(np.single(pf))
@@ -383,20 +391,22 @@ class BaseSimProcessor:
             self._postfilter_torch = torch.as_tensor(self._postfilter, device=self.tdev)
 
     def crossCorrelations(self, img):
-        '''Calculate cross-correlations to revieal carrier, sum input images if there are more than self._nsteps'''
-        N = len(img[0, :, :])
+        '''Calculate cross-correlations to reveal carrier, sum input images if there are more than self._nsteps'''
+        Ny, Nx = img[0, :, :].shape
 
         # Recalculate arrays by default to account for changes to parameters
         dx = self.pixelsize / self.magnification  # Sampling in image plane
         res = self.wavelength / (2 * self.NA)
         oversampling = res / dx
-        dk = oversampling / (N / 2)  # Sampling in frequency plane
-        k = np.arange(-N / 2, N / 2, dtype=np.double) * dk
-        kr = np.sqrt(k ** 2 + k[:, np.newaxis] ** 2, dtype=np.single)
+        dkx = oversampling / (Nx / 2)  # Sampling in frequency plane
+        dky = oversampling / (Ny / 2)  # Sampling in frequency plane
+        kx = np.arange(-Nx / 2, Nx / 2, dtype=np.double) * dkx
+        ky = np.arange(-Ny / 2, Ny / 2, dtype=np.double) * dky
+        kr = np.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2, dtype=np.single)
         M = np.linalg.pinv(self._get_band_construction_matrix())
 
         if len(img) > self._nsteps:
-            imgs = np.zeros((self._nsteps, N, N), dtype=np.single)
+            imgs = np.zeros((self._nsteps, Ny, Nx), dtype=np.single)
             for i in range(self._nsteps):
                 imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0,
                                        dtype=np.single)
@@ -417,21 +427,23 @@ class BaseSimProcessor:
         return ixf
 
     def crossCorrelations_cupy(self, img):
-        '''Calculate cross-correlations to revieal carrier, sum input images if there are more than self._nsteps'''
+        '''Calculate cross-correlations to reveal carrier, sum input images if there are more than self._nsteps'''
         assert cupy, "No CuPy present"
-        N = len(img[0, :, :])
+        Ny, Nx = img[0, :, :].shape
 
         # Recalculate arrays by default to account for changes to parameters
         dx = self.pixelsize / self.magnification  # Sampling in image plane
         res = self.wavelength / (2 * self.NA)
         oversampling = res / dx
-        dk = oversampling / (N / 2)  # Sampling in frequency plane
-        k = cp.arange(-N / 2, N / 2, dtype=cp.double) * dk
-        kr = cp.sqrt(k ** 2 + k[:, cp.newaxis] ** 2, dtype=cp.single)
+        dkx = oversampling / (Nx / 2)  # Sampling in frequency plane
+        dky = oversampling / (Ny / 2)  # Sampling in frequency plane
+        kx = cp.arange(-Nx / 2, Nx / 2, dtype=cp.double) * dkx
+        ky = cp.arange(-Ny / 2, Ny / 2, dtype=cp.double) * dky
+        kr = cp.sqrt(kx ** 2 + ky[:, cp.newaxis] ** 2, dtype=cp.single)
         M = cp.linalg.pinv(cp.asarray(self._get_band_construction_matrix()))
 
         if len(img) > self._nsteps:
-            imgs = cp.zeros((self._nsteps, N, N), dtype=np.single)
+            imgs = cp.zeros((self._nsteps, Ny, Nx), dtype=np.single)
             imgt = cp.asarray(img, dtype=cp.single)
             for i in range(self._nsteps):
                 imgs[i, :, :] = cp.sum(imgt[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0,
@@ -453,22 +465,24 @@ class BaseSimProcessor:
         return ixf
 
     def crossCorrelations_pytorch(self, img):
-        '''Calculate cross-correlations to revieal carrier, sum input images if there are more than self._nsteps'''
+        '''Calculate cross-correlations to revieal carrer, sum input images if there are more than self._nsteps'''
         assert pytorch, "No pytorch present"
 
-        N = len(img[0, :, :])
+        Ny, Nx = img[0, :, :].shape
 
         # Recalculate arrays by default to account for changes to parameters
         dx = self.pixelsize / self.magnification  # Sampling in image plane
         res = self.wavelength / (2 * self.NA)
         oversampling = res / dx
-        dk = oversampling / (N / 2)  # Sampling in frequency plane
-        k = torch.arange(-N / 2, N / 2, dtype=torch.float32, device=self.tdev) * dk
-        kr = torch.sqrt(k ** 2 + k[:, np.newaxis] ** 2)
+        dkx = oversampling / (Nx / 2)  # Sampling in frequency plane
+        dky = oversampling / (Ny / 2)  # Sampling in frequency plane
+        kx = torch.arange(-Nx / 2, Nx / 2, dtype=np.float32, device=self.tdev) * dkx
+        ky = torch.arange(-Ny / 2, Ny / 2, dtype=np.float32, device=self.tdev) * dky
+        kr = torch.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2)
         M = torch.linalg.pinv(torch.as_tensor(self._get_band_construction_matrix(), dtype=torch.complex64, device=self.tdev))
 
         if len(img) > self._nsteps:
-            imgs = torch.zeros((self._nsteps, N, N), dtype=torch.float32, device=self.tdev)
+            imgs = torch.zeros((self._nsteps, Ny, Nx), dtype=torch.float32, device=self.tdev)
             imgt = torch.as_tensor(np.float32(img), device=self.tdev)
             for i in range(self._nsteps):
                 imgs[i, :, :] = torch.sum(imgt[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0)
@@ -588,32 +602,32 @@ class BaseSimProcessor:
 
     def reconstruct_fftw(self, img):
         imf = fft.fft2(img) * self._prefilter
-        self._carray[:, 0:self.N // 2, 0:self.N // 2] = imf[:, 0:self.N // 2, 0:self.N // 2]
-        self._carray[:, 0:self.N // 2, 3 * self.N // 2:2 * self.N] = imf[:, 0:self.N // 2, self.N // 2:self.N]
-        self._carray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2] = imf[:, self.N // 2:self.N, 0:self.N // 2]
-        self._carray[:, 3 * self.N // 2:2 * self.N, 3 * self.N // 2:2 * self.N] = imf[:, self.N // 2:self.N,
-                                                                                  self.N // 2:self.N]
+        self._carray[:, 0:self.Ny // 2, 0:self.Nx // 2] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2]
+        self._carray[:, 0:self.Ny // 2, 3 * self.Nx // 2:2 * self.Nx] = imf[:, 0:self.Ny // 2, self.Nx // 2:self.N]
+        self._carray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2] = imf[:, self.Ny // 2:self.Ny, 0:self.Nx // 2]
+        self._carray[:, 3 * self.Ny // 2:2 * self.Ny, 3 * self.Nx // 2:2 * self.Nx] = imf[:, self.Ny // 2:self.Ny,
+                                                                                  self.Nx // 2:self.Nx]
         img2 = np.sum(np.real(fft.ifft2(self._carray)).real * self._reconfactor, 0)
         self._imgstore = img.copy()
         self._bigimgstore = fft.ifft2(fft.fft2(img2) * self._postfilter).real
         return self._bigimgstore
 
     def reconstruct_rfftw(self, img):
-        imf = fft.rfft2(img) * self._prefilter[:, 0:self.N // 2 + 1]
-        self._carray1[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[:, 0:self.N // 2, 0:self.N // 2 + 1]
-        self._carray1[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[:, self.N // 2:self.N, 0:self.N // 2 + 1]
+        imf = fft.rfft2(img) * self._prefilter[:, 0:self.Nx // 2 + 1]
+        self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+        self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[:, self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
         img2 = np.sum(fft.irfft2(self._carray1) * self._reconfactor, 0)
         self._imgstore = img.copy()
-        self._bigimgstore = fft.irfft2(fft.rfft2(img2) * self._postfilter[:, 0:self.N + 1])
+        self._bigimgstore = fft.irfft2(fft.rfft2(img2) * self._postfilter[:, 0:self.Nx + 1])
         return self._bigimgstore
 
     def reconstruct_ocv(self, img):
         assert opencv, "No opencv present"
-        img2 = np.zeros((2 * self.N, 2 * self.N), dtype=np.single)
+        img2 = np.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
         for i in range(self._nsteps):
             imf = cv2.mulSpectrums(cv2.dft(img[i, :, :]), self._prefilter_ocv, 0)
-            self._carray_ocv[0:self.N // 2, 0:self.N] = imf[0:self.N // 2, 0:self.N]
-            self._carray_ocv[3 * self.N // 2:2 * self.N, 0:self.N] = imf[self.N // 2:self.N, 0:self.N]
+            self._carray_ocv[0:self.Ny // 2, 0:self.Nx] = imf[0:self.Ny // 2, 0:self.Nx]
+            self._carray_ocv[3 * self.Ny // 2:2 * self.Ny, 0:self.Nx] = imf[self.Ny // 2:self.Ny, 0:self.Nx]
             img2 = cv2.add(img2, cv2.multiply(cv2.idft(self._carray_ocv, flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT),
                                               self._reconfactor[i, :, :]))
         self._imgstore = img.copy()
@@ -622,19 +636,19 @@ class BaseSimProcessor:
 
     def reconstruct_ocvU(self, img):
         assert opencv, "No opencv present"
-        img2 = cv2.UMat((2 * self.N, 2 * self.N), s=0.0, type=cv2.CV_32FC1)
-        mask = cv2.UMat((self.N // 2, self.N // 2), s=1, type=cv2.CV_8U)
+        img2 = cv2.UMat((2 * self.Ny, 2 * self.Nx), s=0.0, type=cv2.CV_32FC1)
+        mask = cv2.UMat((self.Ny // 2, self.Nx // 2), s=1, type=cv2.CV_8U)
         for i in range(self._nsteps):
             self._imgstoreU[i] = cv2.UMat(img[i, :, :])
             imf = cv2.multiply(cv2.dft(self._imgstoreU[i], flags=cv2.DFT_COMPLEX_OUTPUT), self._prefilter_ocvU)
-            cv2.copyTo(src=cv2.UMat(imf, (0, 0, self.N // 2, self.N // 2)), mask=mask,
-                       dst=cv2.UMat(self._carray_ocvU, (0, 0, self.N // 2, self.N // 2)))
-            cv2.copyTo(src=cv2.UMat(imf, (0, self.N // 2, self.N // 2, self.N // 2)), mask=mask,
-                       dst=cv2.UMat(self._carray_ocvU, (0, 3 * self.N // 2, self.N // 2, self.N // 2)))
-            cv2.copyTo(src=cv2.UMat(imf, (self.N // 2, 0, self.N // 2, self.N // 2)), mask=mask,
-                       dst=cv2.UMat(self._carray_ocvU, (3 * self.N // 2, 0, self.N // 2, self.N // 2)))
-            cv2.copyTo(src=cv2.UMat(imf, (self.N // 2, self.N // 2, self.N // 2, self.N // 2)), mask=mask,
-                       dst=cv2.UMat(self._carray_ocvU, (3 * self.N // 2, 3 * self.N // 2, self.N // 2, self.N // 2)))
+            cv2.copyTo(src=cv2.UMat(imf, (0, 0, self.Ny // 2, self.Nx // 2)), mask=mask,
+                       dst=cv2.UMat(self._carray_ocvU, (0, 0, self.Ny // 2, self.Nx // 2)))
+            cv2.copyTo(src=cv2.UMat(imf, (0, self.Nx // 2, self.Ny // 2, self.Nx// 2)), mask=mask,
+                       dst=cv2.UMat(self._carray_ocvU, (0, 3 * self.Nx // 2, self.Ny // 2, self.Nx // 2)))
+            cv2.copyTo(src=cv2.UMat(imf, (self.Ny // 2, 0, self.Ny // 2, self.Nx // 2)), mask=mask,
+                       dst=cv2.UMat(self._carray_ocvU, (3 * self.Ny // 2, 0, self.Ny // 2, self.Nx // 2)))
+            cv2.copyTo(src=cv2.UMat(imf, (self.Ny // 2, self.Nx // 2, self.Ny // 2, self.Nx // 2)), mask=mask,
+                       dst=cv2.UMat(self._carray_ocvU, (3 * self.Ny // 2, 3 * self.Nx // 2, self.Ny // 2, self.Nx // 2)))
             img2 = cv2.add(img2, cv2.multiply(cv2.idft(self._carray_ocvU, flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT),
                                               self._reconfactorU[i]))
         self._bigimgstoreU = cv2.idft(cv2.multiply(cv2.dft(img2, flags=cv2.DFT_COMPLEX_OUTPUT), self._postfilter_ocvU),
@@ -644,14 +658,14 @@ class BaseSimProcessor:
     def reconstruct_cupy(self, img):
         assert cupy, "No CuPy present"
         self._imgstore = img.copy()
-        imf = cp.fft.rfft2(cp.asarray(img)) * cp.asarray(self._prefilter[:, 0:self.N // 2 + 1])
-        self._carray_cp[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[:, 0:self.N // 2, 0:self.N // 2 + 1]
-        self._carray_cp[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[:, self.N // 2:self.N,
-                                                                            0:self.N // 2 + 1]
+        imf = cp.fft.rfft2(cp.asarray(img)) * cp.asarray(self._prefilter[:, 0:self.Nx // 2 + 1])
+        self._carray_cp[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+        self._carray_cp[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[:, self.Ny // 2:self.Ny,
+                                                                            0:self.Nx // 2 + 1]
         del imf
         cp._default_memory_pool.free_all_blocks()
         img2 = cp.sum(cp.fft.irfft2(self._carray_cp) * cp.asarray(self._reconfactor), 0)
-        self._bigimgstore_cp = cp.fft.irfft2(cp.fft.rfft2(img2) * self._postfilter_cp[:, 0:self.N + 1])
+        self._bigimgstore_cp = cp.fft.irfft2(cp.fft.rfft2(img2) * self._postfilter_cp[:, 0:self.Nx + 1])
         del img2
         cp._default_memory_pool.free_all_blocks()
         return self._bigimgstore_cp.get()
@@ -660,23 +674,23 @@ class BaseSimProcessor:
         assert torch, "No PyTorch present"
         img = np.float32(img)
         self._imgstore = img.copy()
-        imf = torch.fft.rfft2(torch.as_tensor(img, device=self.tdev)) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)
-        self._carray_torch[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[:, 0:self.N // 2, 0:self.N // 2 + 1]
-        self._carray_torch[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[:, self.N // 2:self.N,
-                                                                            0:self.N // 2 + 1]
+        imf = torch.fft.rfft2(torch.as_tensor(img, device=self.tdev)) * torch.as_tensor(self._prefilter[:, 0:self.Nx // 2 + 1], device=self.tdev)
+        self._carray_torch[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+        self._carray_torch[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[:, self.Ny // 2:self.Ny,
+                                                                            0:self.Nx // 2 + 1]
         img2 = torch.sum(torch.fft.irfft2(self._carray_torch) * torch.as_tensor(self._reconfactor, device=self.tdev), 0)
-        self._bigimgstore_torch = torch.fft.irfft2(torch.fft.rfft2(img2) * self._postfilter_torch[:, 0:self.N + 1])
+        self._bigimgstore_torch = torch.fft.irfft2(torch.fft.rfft2(img2) * self._postfilter_torch[:, 0:self.Nx + 1])
         return self._bigimgstore_torch.cpu().numpy()
 
     # region Stream reconstruction functions
     def reconstructframe_fftw(self, img, i):
         diff = img - self._imgstore[i, :, :]
         imf = fft.fft2(diff) * self._prefilter
-        self._carray[0, 0:self.N // 2, 0:self.N // 2] = imf[0:self.N // 2, 0:self.N // 2]
-        self._carray[0, 0:self.N // 2, 3 * self.N // 2:2 * self.N] = imf[0:self.N // 2, self.N // 2:self.N]
-        self._carray[0, 3 * self.N // 2:2 * self.N, 0:self.N // 2] = imf[self.N // 2:self.N, 0:self.N // 2]
-        self._carray[0, 3 * self.N // 2:2 * self.N, 3 * self.N // 2:2 * self.N] = imf[self.N // 2:self.N,
-                                                                                  self.N // 2:self.N]
+        self._carray[0, 0:self.Ny // 2, 0:self.Nx // 2] = imf[0:self.Ny // 2, 0:self.Nx // 2]
+        self._carray[0, 0:self.Ny // 2, 3 * self.Nx // 2:2 * self.Nx] = imf[0:self.Ny // 2, self.Nx // 2:self.Nx]
+        self._carray[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2]
+        self._carray[0, 3 * self.Ny // 2:2 * self.Ny, 3 * self.Nx // 2:2 * self.Nx] = imf[self.Ny // 2:self.Ny,
+                                                                                  self.Nx // 2:self.Nx]
         img2 = fft.ifft2(self._carray[0, :, :]).real * self._reconfactor[i, :, :]
         self._imgstore[i, :, :] = img.copy()
         self._bigimgstore = self._bigimgstore + fft.ifft2(fft.fft2(img2) * self._postfilter).real
@@ -684,20 +698,20 @@ class BaseSimProcessor:
 
     def reconstructframe_rfftw(self, img, i):
         diff = img.astype(np.single) - self._imgstore[i, :, :].astype(np.single)
-        imf = fft.rfft2(diff) * self._prefilter[:, 0:self.N // 2 + 1]
-        self._carray1[0, 0:self.N // 2, 0:self.N // 2 + 1] = imf[0:self.N // 2, 0:self.N // 2 + 1]
-        self._carray1[0, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[self.N // 2:self.N, 0:self.N // 2 + 1]
+        imf = fft.rfft2(diff) * self._prefilter[:, 0:self.Nx // 2 + 1]
+        self._carray1[0, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[0:self.Ny // 2, 0:self.Nx // 2 + 1]
+        self._carray1[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
         img2 = fft.irfft2(self._carray1[0, :, :]) * self._reconfactor[i, :, :]
         self._imgstore[i, :, :] = img.copy()
-        self._bigimgstore = self._bigimgstore + fft.irfft2(fft.rfft2(img2) * self._postfilter[:, 0:self.N + 1])
+        self._bigimgstore = self._bigimgstore + fft.irfft2(fft.rfft2(img2) * self._postfilter[:, 0:self.Nx + 1])
         return self._bigimgstore
 
     def reconstructframe_ocv(self, img, i):
         assert opencv, "No opencv present"
         diff = img - self._imgstore[i, :, :]
         imf = cv2.mulSpectrums(cv2.dft(diff), self._prefilter_ocv, 0)
-        self._carray_ocv[0:self.N // 2, 0:self.N] = imf[0:self.N // 2, 0:self.N]
-        self._carray_ocv[3 * self.N // 2:2 * self.N, 0:self.N] = imf[self.N // 2:self.N, 0:self.N]
+        self._carray_ocv[0:self.Ny // 2, 0:self.Nx] = imf[0:self.Ny // 2, 0:self.Nx]
+        self._carray_ocv[3 * self.Ny // 2:2 * self.Ny, 0:self.Nx] = imf[self.Ny // 2:self.Ny, 0:self.Nx]
         img2 = cv2.multiply(cv2.idft(self._carray_ocv, flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT),
                             self._reconfactor[i, :, :])
         self._imgstore[i, :, :] = img.copy()
@@ -707,18 +721,18 @@ class BaseSimProcessor:
 
     def reconstructframe_ocvU(self, img, i):
         assert opencv, "No opencv present"
-        mask = cv2.UMat((self.N // 2, self.N // 2), s=1, type=cv2.CV_8U)
+        mask = cv2.UMat((self.Ny // 2, self.Nx // 2), s=1, type=cv2.CV_8U)
         imU = cv2.UMat(img)
         diff = cv2.subtract(imU, self._imgstoreU[i])
         imf = cv2.multiply(cv2.dft(diff, flags=cv2.DFT_COMPLEX_OUTPUT), self._prefilter_ocvU)
-        cv2.copyTo(src=cv2.UMat(imf, (0, 0, self.N // 2, self.N // 2)), mask=mask,
-                   dst=cv2.UMat(self._carray_ocvU, (0, 0, self.N // 2, self.N // 2)))
-        cv2.copyTo(src=cv2.UMat(imf, (0, self.N // 2, self.N // 2, self.N // 2)), mask=mask,
-                   dst=cv2.UMat(self._carray_ocvU, (0, 3 * self.N // 2, self.N // 2, self.N // 2)))
-        cv2.copyTo(src=cv2.UMat(imf, (self.N // 2, 0, self.N // 2, self.N // 2)), mask=mask,
-                   dst=cv2.UMat(self._carray_ocvU, (3 * self.N // 2, 0, self.N // 2, self.N // 2)))
-        cv2.copyTo(src=cv2.UMat(imf, (self.N // 2, self.N // 2, self.N // 2, self.N // 2)), mask=mask,
-                   dst=cv2.UMat(self._carray_ocvU, (3 * self.N // 2, 3 * self.N // 2, self.N // 2, self.N // 2)))
+        cv2.copyTo(src=cv2.UMat(imf, (0, 0, self.Ny // 2, self.Nx // 2)), mask=mask,
+                   dst=cv2.UMat(self._carray_ocvU, (0, 0, self.Ny // 2, self.Nx // 2)))
+        cv2.copyTo(src=cv2.UMat(imf, (0, self.Nx // 2, self.Ny // 2, self.Nx // 2)), mask=mask,
+                   dst=cv2.UMat(self._carray_ocvU, (0, 3 * self.Nx // 2, self.Ny // 2, self.Nx // 2)))
+        cv2.copyTo(src=cv2.UMat(imf, (self.Ny // 2, 0, self.Ny // 2, self.Nx // 2)), mask=mask,
+                   dst=cv2.UMat(self._carray_ocvU, (3 * self.Ny // 2, 0, self.Ny // 2, self.Nx // 2)))
+        cv2.copyTo(src=cv2.UMat(imf, (self.Ny // 2, self.Nx // 2, self.Ny // 2, self.Nx // 2)), mask=mask,
+                   dst=cv2.UMat(self._carray_ocvU, (3 * self.Ny // 2, 3 * self.Nx // 2, self.Ny // 2, self.Nx // 2)))
         img2 = cv2.multiply(cv2.idft(self._carray_ocvU, flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT),
                             self._reconfactorU[i])
         self._imgstoreU[i] = imU
@@ -731,12 +745,12 @@ class BaseSimProcessor:
     def reconstructframe_cupy(self, img, i):
         assert cupy, "No CuPy present"
         diff = cp.asarray(img, dtype=np.single) - cp.asarray(self._imgstore[i, :, :], dtype=np.single)
-        imf = cp.fft.rfft2(diff) * cp.asarray(self._prefilter[:, 0:self.N // 2 + 1])
-        self._carray_cp[0, 0:self.N // 2, 0:self.N // 2 + 1] = imf[0:self.N // 2, 0:self.N // 2 + 1]
-        self._carray_cp[0, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[self.N // 2:self.N, 0:self.N // 2 + 1]
+        imf = cp.fft.rfft2(diff) * cp.asarray(self._prefilter[:, 0:self.Nx // 2 + 1])
+        self._carray_cp[0, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[0:self.Ny // 2, 0:self.Nx // 2 + 1]
+        self._carray_cp[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
         img2 = cp.fft.irfft2(self._carray_cp[0, :, :]) * cp.asarray(self._reconfactor[i, :, :])
         self._bigimgstore_cp = self._bigimgstore_cp + cp.fft.irfft2(
-            cp.fft.rfft2(img2) * self._postfilter_cp[:, 0:self.N + 1])
+            cp.fft.rfft2(img2) * self._postfilter_cp[:, 0:self.Nx + 1])
         self._imgstore[i, :, :] = img.copy()
         del img2
         del imf
@@ -746,12 +760,12 @@ class BaseSimProcessor:
     def reconstructframe_pytorch(self, img, i):
         assert torch, "No CuPy present"
         diff = torch.as_tensor(img, dtype=torch.float32, device=self.tdev) - torch.as_tensor(self._imgstore[i, :, :], device=self.tdev)
-        imf = torch.fft.rfft2(diff) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)
-        self._carray_torch[0, 0:self.N // 2, 0:self.N // 2 + 1] = imf[0:self.N // 2, 0:self.N // 2 + 1]
-        self._carray_torch[0, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[self.N // 2:self.N, 0:self.N // 2 + 1]
+        imf = torch.fft.rfft2(diff) * torch.as_tensor(self._prefilter[:, 0:self.Nx // 2 + 1], device=self.tdev)
+        self._carray_torch[0, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[0:self.Ny // 2, 0:self.Nx // 2 + 1]
+        self._carray_torch[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
         img2 = torch.fft.irfft2(self._carray_torch[0, :, :]) * torch.as_tensor(self._reconfactor[i, :, :], device=self.tdev)
         self._bigimgstore_torch = self._bigimgstore_torch + torch.fft.irfft2(
-            torch.fft.rfft2(img2) * self._postfilter_torch[:, 0:self.N + 1])
+            torch.fft.rfft2(img2) * self._postfilter_torch[:, 0:self.Nx + 1])
         self._imgstore[i, :, :] = img.copy()
         return self._bigimgstore_torch.cpu().numpy()
 
@@ -761,43 +775,43 @@ class BaseSimProcessor:
         nim = img.shape[0]
         r = np.mod(nim, self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), np.single)))
+            img = np.concatenate((img, np.zeros((self._nsteps - r, self.Ny, self.Nx), np.single)))
             nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
-        imf = fft.rfft2(img) * self._prefilter[:, 0:self.N // 2 + 1]
-        img2 = np.zeros([nim, 2 * self.N, 2 * self.N], dtype=np.single)
+        imf = fft.rfft2(img) * self._prefilter[:, 0:self.Nx // 2 + 1]
+        img2 = np.zeros([nim, 2 * self.Ny, 2 * self.Nx], dtype=np.single)
         for i in range(0, nim, self._nsteps):
-            self._carray1[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-            self._carray1[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                              0:self.N // 2 + 1]
+            self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+            self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
+                                                                              0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = fft.irfft2(self._carray1) * self._reconfactor
         img3 = fft.irfft(fft.rfft(img2, nim, 0)[0:nimg // 2 + 1, :, :], nimg, 0)
-        res = fft.irfft2(fft.rfft2(img3) * self._postfilter[:, :self.N + 1])
+        res = fft.irfft2(fft.rfft2(img3) * self._postfilter[:, :self.Nx + 1])
         return res
 
     def batchreconstructcompact(self, img, blocksize=128):
         nim = img.shape[0]
         r = np.mod(nim, self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), np.single)))
+            img = np.concatenate((img, np.zeros((self._nsteps - r, self.Ny, self.Nx), np.single)))
             nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
-        imf = fft.rfft2(img) * self._prefilter[:, 0:self.N // 2 + 1]
-        img2 = np.zeros([nim, 2 * self.N, 2 * self.N], dtype=np.single)
+        imf = fft.rfft2(img) * self._prefilter[:, 0:self.Nx // 2 + 1]
+        img2 = np.zeros([nim, 2 * self.Ny, 2 * self.Nx], dtype=np.single)
         for i in range(0, nim, self._nsteps):
-            self._carray1[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-            self._carray1[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                              0:self.N // 2 + 1]
+            self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+            self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
+                                                                              0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = fft.irfft2(self._carray1) * self._reconfactor
-        img3 = np.zeros((nimg, 2 * self.N, 2 * self.N), dtype=np.single)
+        img3 = np.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
 
-        for offs in range(0, 2 * self.N - blocksize, blocksize):
-            imf = fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-            img3[:, offs:offs + blocksize, 0:2 * self.N] = fft.irfft(imf, nimg, 0)
-        imf = fft.rfft(img2[:, offs + blocksize:2 * self.N, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-        img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = fft.irfft(imf, nimg, 0)
+        for offs in range(0, 2 * self.Ny - blocksize, blocksize):
+            imf = fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
+            img3[:, offs:offs + blocksize, 0:2 * self.Nx] = fft.irfft(imf, nimg, 0)
+        imf = fft.rfft(img2[:, offs + blocksize:2 * self.Ny, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
+        img3[:, offs + blocksize:2 * self.Ny, 0:2 * self.Nx] = fft.irfft(imf, nimg, 0)
 
-        res = fft.irfft2(fft.rfft2(img3) * self._postfilter[:, :self.N + 1])
+        res = fft.irfft2(fft.rfft2(img3) * self._postfilter[:, :self.Nx + 1])
         return res
 
     def batchreconstruct_cupy(self, img):
@@ -807,10 +821,10 @@ class BaseSimProcessor:
         nim = img.shape[0]
         r = np.mod(nim, self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-            img = np.concatenate((img, cp.zeros((self._nsteps - r, self.N, self.N), np.single)))
+            img = np.concatenate((img, cp.zeros((self._nsteps - r, self.Ny, self.Nx), np.single)))
             nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
-        imf = cp.fft.rfft2(img) * cp.asarray(self._prefilter[:, 0:self.N // 2 + 1])
+        imf = cp.fft.rfft2(img) * cp.asarray(self._prefilter[:, 0:self.Nx // 2 + 1])
 
         del img
         # cp._default_memory_pool.free_all_blocks()
@@ -819,13 +833,13 @@ class BaseSimProcessor:
         #     print(mempool.used_bytes())
         #     print(mempool.total_bytes())
 
-        img2 = cp.zeros((nim, 2 * self.N, 2 * self.N), dtype=np.single)
-        bcarray = cp.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
+        img2 = cp.zeros((nim, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
+        bcarray = cp.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=np.complex64)
         reconfactor_cp = cp.asarray(self._reconfactor)
         for i in range(0, nim, self._nsteps):
-            bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-            bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                        0:self.N // 2 + 1]
+            bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+            bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
+                                                                        0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = cp.fft.irfft2(bcarray) * reconfactor_cp
 
         del imf
@@ -843,7 +857,7 @@ class BaseSimProcessor:
         # if self.debug:
         #     print(mempool.used_bytes())
         #     print(mempool.total_bytes())
-        res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
+        res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.Nx + 1])).get()
         del img3
         # cp._default_memory_pool.free_all_blocks()
         return res
@@ -857,34 +871,34 @@ class BaseSimProcessor:
             nim = img1.shape[0]
             r = np.mod(nim, self._nsteps)
             if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-                img1 = cp.concatenate((img1, cp.zeros((self._nsteps - r, self.N, self.N), np.single)))
+                img1 = cp.concatenate((img1, cp.zeros((self._nsteps - r, self.Ny, self.Nx), np.single)))
                 nim = nim + self._nsteps - r
             nimg = nim // self._nsteps
-            imf = cp.fft.rfft2(img1) * cp.array(self._prefilter[:, 0:self.N // 2 + 1])
+            imf = cp.fft.rfft2(img1) * cp.array(self._prefilter[:, 0:self.Nx // 2 + 1])
 
             del img1
 
-            img2 = cp.zeros((nim, 2 * self.N, 2 * self.N), dtype=np.single)
-            bcarray = cp.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=np.complex64)
+            img2 = cp.zeros((nim, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
+            bcarray = cp.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=np.complex64)
             reconfactor_cp = cp.array(self._reconfactor)
             for i in range(0, nim, self._nsteps):
-                bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-                bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                            0:self.N // 2 + 1]
+                bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+                bcarray[:, 3 * self.Ny // 2:2 * self.Nx, 0:self.Ny // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
+                                                                            0:self.Nx // 2 + 1]
                 img2[i:i + self._nsteps, :, :] = cp.fft.irfft2(bcarray) * reconfactor_cp
 
             del bcarray
             del reconfactor_cp
 
-            img3 = cp.zeros((nimg, 2 * self.N, 2 * self.N), dtype=np.single)
-            for offs in range(0, 2*self.N - blocksize, blocksize):
-                imf = cp.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-                img3[:, offs:offs + blocksize, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
-            imf = cp.fft.rfft(img2[:, offs + blocksize:2 * self.N, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-            img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = cp.fft.irfft(imf, nimg, 0)
+            img3 = cp.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
+            for offs in range(0, 2*self.Ny - blocksize, blocksize):
+                imf = cp.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
+                img3[:, offs:offs + blocksize, 0:2 * self.Nx] = cp.fft.irfft(imf, nimg, 0)
+            imf = cp.fft.rfft(img2[:, offs + blocksize:2 * self.Ny, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
+            img3[:, offs + blocksize:2 * self.Ny, 0:2 * self.Nx] = cp.fft.irfft(imf, nimg, 0)
             del img2
             del imf
-            res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.N + 1])).get()
+            res = (cp.fft.irfft2(cp.fft.rfft2(img3) * self._postfilter_cp[:, :self.Nx + 1])).get()
             del img3
         except Exception as e:
             res = f'Exception in batchreconstruct_cupy: {e}'
@@ -903,30 +917,30 @@ class BaseSimProcessor:
             nim = img.shape[0]
             r = np.mod(nim, self._nsteps)
             if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-                img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), img.dtype)))
+                img = np.concatenate((img, np.zeros((self._nsteps - r, self.Ny, self.Nx), img.dtype)))
                 nim = nim + self._nsteps - r
             nimg = nim // self._nsteps
             img1 = torch.as_tensor(np.single(img), dtype=torch.float32, device=self.tdev)
-            imf = torch.fft.rfft2(img1) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)
+            imf = torch.fft.rfft2(img1) * torch.as_tensor(self._prefilter[:, 0:self.Nx // 2 + 1], device=self.tdev)
             del img1
-            img2 = torch.zeros((nim, 2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
-            bcarray = torch.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=torch.complex64, device=self.tdev)
+            img2 = torch.zeros((nim, 2 * self.Ny, 2 * self.Nx), dtype=torch.float32, device=self.tdev)
+            bcarray = torch.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=torch.complex64, device=self.tdev)
             reconfactor_pt = torch.as_tensor(self._reconfactor, device=self.tdev)
             for i in range(0, nim, self._nsteps):
-                bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-                bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                            0:self.N // 2 + 1]
+                bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+                bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
+                                                                            0:self.Nx // 2 + 1]
                 img2[i:i + self._nsteps, :, :] = torch.fft.irfft2(bcarray) * reconfactor_pt
 
-            img3 = torch.zeros((nimg, 2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
-            for offs in range(0, 2 * self.N - blocksize, blocksize):
-                imf = torch.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-                img3[:, offs:offs + blocksize, 0:2 * self.N] = torch.fft.irfft(imf, nimg, 0)
-            imf = torch.fft.rfft(img2[:, offs + blocksize:2 * self.N, 0:2 * self.N], nim, 0)[:nimg // 2 + 1, :, :]
-            img3[:, offs + blocksize:2 * self.N, 0:2 * self.N] = torch.fft.irfft(imf, nimg, 0)
+            img3 = torch.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=torch.float32, device=self.tdev)
+            for offs in range(0, 2 * self.Ny - blocksize, blocksize):
+                imf = torch.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
+                img3[:, offs:offs + blocksize, 0:2 * self.Nx] = torch.fft.irfft(imf, nimg, 0)
+            imf = torch.fft.rfft(img2[:, offs + blocksize:2 * self.Ny, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
+            img3[:, offs + blocksize:2 * self.Ny, 0:2 * self.Nx] = torch.fft.irfft(imf, nimg, 0)
             del img2
             postfilter_pt = torch.as_tensor(self._postfilter, device=self.tdev)
-            res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.N + 1])).cpu().numpy()
+            res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.Nx + 1])).cpu().numpy()
         except Exception as e:
             res = f'Exception in batchreconstruct_pytorch: {e}'
         return res
@@ -948,25 +962,25 @@ class BaseSimProcessor:
         nim = img.shape[0]
         r = np.mod(nim, self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
-            img = np.concatenate((img, np.zeros((self._nsteps - r, self.N, self.N), img.dtype)))
+            img = np.concatenate((img, np.zeros((self._nsteps - r, self.Ny, self.Nx), img.dtype)))
             nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         img = torch.as_tensor(np.single(img), dtype=torch.float32, device=self.tdev)
-        imf = torch.fft.rfft2(img) * torch.as_tensor(self._prefilter[:, 0:self.N // 2 + 1], device=self.tdev)
+        imf = torch.fft.rfft2(img) * torch.as_tensor(self._prefilter[:, 0:self.Nx // 2 + 1], device=self.tdev)
 
-        img2 = torch.zeros((nim, 2 * self.N, 2 * self.N), dtype=torch.float32, device=self.tdev)
-        bcarray = torch.zeros((self._nsteps, 2 * self.N, self.N + 1), dtype=torch.complex64, device=self.tdev)
+        img2 = torch.zeros((nim, 2 * self.Ny, 2 * self.Nx), dtype=torch.float32, device=self.tdev)
+        bcarray = torch.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=torch.complex64, device=self.tdev)
         reconfactor_pt = torch.as_tensor(self._reconfactor, device=self.tdev)
         for i in range(0, nim, self._nsteps):
-            bcarray[:, 0:self.N // 2, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, 0:self.N // 2, 0:self.N // 2 + 1]
-            bcarray[:, 3 * self.N // 2:2 * self.N, 0:self.N // 2 + 1] = imf[i:i + self._nsteps, self.N // 2:self.N,
-                                                                        0:self.N // 2 + 1]
+            bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
+            bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
+                                                                        0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = torch.fft.irfft2(bcarray) * reconfactor_pt
 
         img3 = torch.fft.irfft(torch.fft.rfft(img2, nim, 0)[0:nimg // 2 + 1, :, :], nimg, 0)
 
         postfilter_pt = torch.as_tensor(self._postfilter, device=self.tdev)
-        res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.N + 1])).cpu().numpy()
+        res = (torch.fft.irfft2(torch.fft.rfft2(img3) * postfilter_pt[:, :self.Nx + 1])).cpu().numpy()
         return res
 
     def empty_cache(self):
@@ -1002,23 +1016,26 @@ class BaseSimProcessor:
         if useTorch:
             img = torch.as_tensor(np.single(img), device=self.tdev)
             kr = torch.as_tensor(self._kr, device=self.tdev)
-            otf = torch.ones((self.N, self.N), dtype=torch.float32, device=self.tdev)
+            otf = torch.ones((self.Ny, self.Nx), dtype=torch.float32, device=self.tdev)
             imgnsum = torch.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype=torch.float32, device=self.tdev)
-            xx = torch.arange(-self.N / 2 * self._dx, self.N / 2 * self._dx, self._dx, dtype=torch.float64, device=self.tdev)
+            xx = torch.arange(-self.Nx / 2 * self._dx, self.Nx / 2 * self._dx, self._dx, dtype=torch.float64, device=self.tdev)
+            yy = torch.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=torch.float64, device=self.tdev)
             (TF, FFT, xp) = (self._tf_pytorch, torch.fft, torch)
         elif useCupy:
             img = cp.asarray(img, dtype=cp.float32)
             kr = cp.asarray(self._kr)
-            otf = cp.ones((self.N, self.N), dtype=cp.float32)
+            otf = cp.ones((self.Ny, self.Nx), dtype=cp.float32)
             imgnsum = cp.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype=cp.float32)
-            xx = cp.arange(-self.N / 2 * self._dx, self.N / 2 * self._dx, self._dx, dtype=cp.float64)
+            xx = cp.arange(-self.Nx / 2 * self._dx, self.Nx / 2 * self._dx, self._dx, dtype=cp.float64)
+            yy = cp.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=cp.float64)
             (TF, FFT, xp) = (self._tf_cupy, cp.fft, cp)
         else:
             img = np.float32(img)
             kr = self._kr
-            otf = np.ones((self.N, self.N), dtype = np.float32)
+            otf = np.ones((self.Nx, self.Ny), dtype = np.float32)
             imgnsum = np.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype = np.single)
-            xx = np.arange(-self.N / 2 * self._dx, self.N / 2 * self._dx, self._dx, dtype=np.double)
+            xx = np.arange(-self.Nx / 2 * self._dx, self.Nx / 2 * self._dx, self._dx, dtype=np.double)
+            yy = np.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=np.double)
             (TF, FFT, xp) = (self._tf, np.fft, np)
 
         hpf = 1.0 * (kr > self.eta / 2)
@@ -1036,7 +1053,7 @@ class BaseSimProcessor:
         p = FFT.ifft2(FFT.fft2(imgnsum - imgsum) * hpf)
         p0 = FFT.ifft2(FFT.fft2(imgsum) * hpf)
         phase_shift_to_xpeak = xp.exp(1j * kx * xx * 2 * pi * self.NA / self.wavelength)
-        phase_shift_to_ypeak = xp.exp(1j * ky * xx * 2 * pi * self.NA / self.wavelength)
+        phase_shift_to_ypeak = xp.exp(1j * ky * yy * 2 * pi * self.NA / self.wavelength)
         scaling = 1 / xp.sum(p0 * p0.conj())
         cross_corr_result = xp.sum(p * p0 * xp.outer(
                         phase_shift_to_ypeak, phase_shift_to_xpeak), axis = (1,2)) * scaling
@@ -1051,20 +1068,20 @@ class BaseSimProcessor:
             else:
                 plt.imshow(xp.sqrt(xp.abs(FFT.fftshift(FFT.fft2(p[0, :, :] * p0)))), cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            pxc0 = np.int(np.round(kx / self._dk) + self.N / 2)
-            pyc0 = np.int(np.round(ky / self._dk) + self.N / 2)
+            pxc0 = np.int(np.round(kx / self._dkx) + self.N / 2)
+            pyc0 = np.int(np.round(ky / self._dky) + self.N / 2)
             circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
-            mag = 25 * self.N / 256
+            mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
             if useTorch:
-                ixfz, Kx, Ky = self._zoomf(p0.cpu().numpy() * p[0, :, :].cpu().numpy(), self.N, np.single(kx), np.single(ky), mag,
-                                       self._dk * self.N)
+                ixfz, Kx, Ky = self._zoomf(p0.cpu().numpy() * p[0, :, :].cpu().numpy(), (self.Ny, self,Nx), np.single(kx), np.single(ky), mag,
+                                       self._dkx * self.Nx)
             elif useCupy:
-                ixfz, Kx, Ky = self._zoomf(p0.get() * p[0, :, :].get(), self.N, np.single(kx), np.single(ky), mag,
-                                       self._dk * self.N)
+                ixfz, Kx, Ky = self._zoomf(p0.get() * p[0, :, :].get(), (self.Ny, self.Nx), np.single(kx), np.single(ky), mag,
+                                       self._dkx * self.Nx)
             else:
-                ixfz, Kx, Ky = self._zoomf(p0 * p[0, :, :], self.N, np.single(kx), np.single(ky), mag,
-                                       self._dk * self.N)
+                ixfz, Kx, Ky = self._zoomf(p0 * p[0, :, :], (self.Ny, self.Nx), np.single(kx), np.single(ky), mag,
+                                       self._dkx * self.Nx)
             plt.figure()
             plt.title('Zoom Find phase')
             plt.imshow(abs(ixfz.squeeze()))
@@ -1103,8 +1120,8 @@ class BaseSimProcessor:
 
         # pyc0, pxc0 = self._findPeak((ixf - gaussian_filter(ixf, 20)) * mask)
         pyc0, pxc0 = self._findPeak(ixf * mask)
-        kx = self._dk * (pxc0 - self.N / 2)
-        ky = self._dk * (pyc0 - self.N / 2)
+        kx = self._dkx * (pxc0 - self.Nx / 2)
+        ky = self._dky * (pyc0 - self.Ny / 2)
 
         if self.debug:
             plt.figure()
@@ -1113,16 +1130,16 @@ class BaseSimProcessor:
             ax = plt.gca()
             circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
             ax.add_artist(circle)
-            circle = plt.Circle((self.N // 2, self.N // 2), radius=2 / self._dk, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
             ax.add_artist(circle)
-            circle = plt.Circle((self.N // 2, self.N // 2), radius=1.9 * self.eta / self._dk, color='cyan', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=3.8 * self.eta / self._dkx, height=3.8 * self.eta / self._dky, color='cyan', fill=False)
             ax.add_artist(circle)
 
         return kx, ky
 
     def _refineCarrier(self, band0, band1, kx_in, ky_in):
-        pxc0 = np.int(np.round(kx_in / self._dk) + self.N // 2)
-        pyc0 = np.int(np.round(ky_in / self._dk) + self.N // 2)
+        pxc0 = np.int(np.round(kx_in / self._dkx) + self.Nx // 2)
+        pyc0 = np.int(np.round(ky_in / self._dky) + self.Ny // 2)
 
         otf_exclude_min_radius = self.eta / 2
         otf_exclude_max_radius = self.eta * 2
@@ -1132,7 +1149,7 @@ class BaseSimProcessor:
 
         otf_mask = (self._kr > otf_exclude_min_radius) & (self._kr < otf_exclude_max_radius)
         otf_mask_for_band_common_freq = fft.fftshift(
-            otf_mask & scipy.ndimage.shift(otf_mask, (pyc0 - (self.N // 2 ), pxc0 - (self.N // 2 )), order=0))
+            otf_mask & scipy.ndimage.shift(otf_mask, (pyc0 - (self.Ny // 2 ), pxc0 - (self.Nx // 2 )), order=0))
 
         if self.debug:
             plt.figure()
@@ -1153,11 +1170,11 @@ class BaseSimProcessor:
             ax = plt.gca()
             circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
             ax.add_artist(circle)
-            circle = plt.Circle((self.N // 2, self.N // 2), radius=2 / self._dk, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
             ax.add_artist(circle)
 
-        mag = 25 * self.N / 256
-        ixfz, Kx, Ky = self._zoomf(band, self.N, np.single(self._k[pxc0]), np.single(self._k[pyc0]), mag , self._dk * self.N)
+        mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
+        ixfz, Kx, Ky = self._zoomf(band, (self.Nx, self.Ny), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag , self._dkx * self.Nx)
         pyc, pxc = self._findPeak(abs(ixfz))
 
         if self.debug:
@@ -1171,9 +1188,10 @@ class BaseSimProcessor:
         kx = Kx[pxc]
         ky = Ky[pyc]
 
-        xx = np.arange(-self.N / 2, self.N / 2, dtype=np.double) * self._dx
+        xx = np.arange(-self.Nx / 2, self.Nx / 2, dtype=np.double) * self._dx
+        yy = np.arange(-self.Ny / 2, self.Ny / 2, dtype=np.double) * self._dy
         phase_shift_to_xpeak = exp(-1j * kx * xx * 2 * pi * self.NA / self.wavelength)
-        phase_shift_to_ypeak = exp(-1j * ky * xx * 2 * pi * self.NA / self.wavelength)
+        phase_shift_to_ypeak = exp(-1j * ky * yy * 2 * pi * self.NA / self.wavelength)
 
         scaling = 1 / np.sum(band0_common * np.conjugate(band0_common))
         cross_corr_result = np.sum(band0_common * band1_common * np.outer(
@@ -1208,8 +1226,8 @@ class BaseSimProcessor:
 
         # pyc0, pxc0 = self._findPeak_cupy((ixf - gaussian_filter_cupy(ixf, 20)) * mask)
         pyc0, pxc0 = self._findPeak_cupy(ixf * mask)
-        kx = self._dk * (pxc0 - self.N / 2)
-        ky = self._dk * (pyc0 - self.N / 2)
+        kx = self._dkx * (pxc0 - self.Nx / 2)
+        ky = self._dky * (pyc0 - self.Ny / 2)
 
         return kx.get(), ky.get()
 
@@ -1217,8 +1235,8 @@ class BaseSimProcessor:
         band0 = cp.asarray(band0)
         band1 = cp.asarray(band1)
 
-        pxc0 = np.int(np.round(kx_in/self._dk)+self.N//2)
-        pyc0 = np.int(np.round(ky_in/self._dk)+self.N//2)
+        pxc0 = np.int(np.round(kx_in/self._dkx) + self.Nx // 2)
+        pyc0 = np.int(np.round(ky_in/self._dky) + self.Ny // 2)
 
         otf_exclude_min_radius = self.eta/2
         otf_exclude_max_radius = 1.5
@@ -1230,15 +1248,15 @@ class BaseSimProcessor:
 
         otf_mask = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
         otf_mask_for_band_common_freq = cp.fft.fftshift(
-            otf_mask & cupyx.scipy.ndimage.shift(otf_mask, (pyc0 - (self.N // 2), pxc0 - (self.N // 2)), order=0))
+            otf_mask & cupyx.scipy.ndimage.shift(otf_mask, (pyc0 - (self.Ny // 2), pxc0 - (self.Nx // 2)), order=0))
 
         band0_common = cp.fft.ifft2(cp.fft.fft2(band0) / otf * otf_mask_for_band_common_freq)
         band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(band1)) / otf * otf_mask_for_band_common_freq)
 
         band = band0_common * band1_common
 
-        mag = 25 * self.N / 256
-        ixfz, Kx, Ky = self._zoomf_cupy(band, self.N, np.single(self._k[pxc0]), np.single(self._k[pyc0]), mag, self._dk * self.N)
+        mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
+        ixfz, Kx, Ky = self._zoomf_cupy(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_cupy(abs(ixfz))
 
         if self.debug:
@@ -1248,15 +1266,16 @@ class BaseSimProcessor:
             ax = plt.gca()
             circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
             ax.add_artist(circle)
-            circle = plt.Circle((self.N // 2, self.N // 2), radius=2 / self._dk, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
             ax.add_artist(circle)
 
         kx = Kx[pxc]
         ky = Ky[pyc]
 
-        xx = cp.arange(-self.N / 2, self.N / 2, dtype=np.double) * self._dx
+        xx = cp.arange(-self.Nx / 2, self.Nx / 2, dtype=np.double) * self._dx
+        yy = cp.arange(-self.Ny / 2, self.Ny / 2, dtype=np.double) * self._dy
         phase_shift_to_xpeak = cp.exp(-1j * kx * xx * 2 * pi * self.NA / self.wavelength)
-        phase_shift_to_ypeak = cp.exp(-1j * ky * xx * 2 * pi * self.NA / self.wavelength)
+        phase_shift_to_ypeak = cp.exp(-1j * ky * yy * 2 * pi * self.NA / self.wavelength)
 
         scaling = 1 / cp.sum(band0_common * cp.conjugate(band0_common))
 
@@ -1286,8 +1305,8 @@ class BaseSimProcessor:
         ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(ix))))
 
         pyc0, pxc0 = self._findPeak_pytorch(ixf * mask)
-        kx = (self._dk * (pxc0 - self.N / 2)).cpu().numpy()
-        ky = (self._dk * (pyc0 - self.N / 2)).cpu().numpy()
+        kx = (self._dkx * (pxc0 - self.Nx / 2)).cpu().numpy()
+        ky = (self._dky * (pyc0 - self.Ny / 2)).cpu().numpy()
 
         if self.debug:
             plt.figure()
@@ -1296,7 +1315,7 @@ class BaseSimProcessor:
             ax = plt.gca()
             circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
             ax.add_artist(circle)
-            circle = plt.Circle((self.N // 2, self.N // 2), radius=2 / self._dk, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
             ax.add_artist(circle)
 
         return kx, ky
@@ -1305,8 +1324,8 @@ class BaseSimProcessor:
         band0 = torch.as_tensor(band0, device=self.tdev)
         band1 = torch.as_tensor(band1, device=self.tdev)
 
-        pxc0 = np.int(np.round(kx_in/self._dk) + self.N // 2)
-        pyc0 = np.int(np.round(ky_in/self._dk) + self.N // 2)
+        pxc0 = np.int(np.round(kx_in/self._dkx) + self.Nx // 2)
+        pyc0 = np.int(np.round(ky_in/self._dky) + self.Ny // 2)
 
         otf_exclude_min_radius = self.eta / 2
         otf_exclude_max_radius = self.eta * 2
@@ -1317,8 +1336,8 @@ class BaseSimProcessor:
         otf = torch.fft.fftshift(self._tfm_pytorch(kr, m) + (~m)*0.0001)
 
         otf_mask = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
-        shiftx = pxc0 - (self.N // 2)
-        shifty = pyc0 - (self.N // 2)
+        shiftx = pxc0 - (self.Nx // 2)
+        shifty = pyc0 - (self.Ny // 2)
         otf_mask_shifted = torch.roll(otf_mask, shifts=(shifty, shiftx), dims=(0, 1))
         if shiftx < 0:
             otf_mask_shifted[:, shiftx:] = False
@@ -1348,11 +1367,11 @@ class BaseSimProcessor:
             ax = plt.gca()
             circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
             ax.add_artist(circle)
-            circle = plt.Circle((self.N // 2, self.N // 2), radius=2 / self._dk, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
             ax.add_artist(circle)
 
-        mag = 25 * self.N / 256
-        ixfz, Kx, Ky = self._zoomf_pytorch(band, self.N, np.single(self._k[pxc0]), np.single(self._k[pyc0]), mag, self._dk * self.N)
+        mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
+        ixfz, Kx, Ky = self._zoomf_pytorch(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_pytorch(abs(ixfz))
 
         if self.debug:
@@ -1388,40 +1407,40 @@ class BaseSimProcessor:
         return torch.div(indx, in_array.shape[0], rounding_mode='floor'), indx % in_array.shape[0]
 
     def _zoomf(self, in_arr, M, kx, ky, mag, kmax):
-        resy = self._pyczt(in_arr, M, exp(-1j * 2 * pi / (mag * M)), exp(-1j * pi * (1 / mag - 2 * ky / kmax)))
-        res = self._pyczt(resy.T, M, exp(-1j * 2 * pi / (mag * M)), exp(-1j * pi * (1 / mag - 2 * kx / kmax))).T
-        kyarr = -kmax * (1 / mag - 2 * ky / kmax) / 2 + (kmax / (mag * M)) * np.arange(0, M)
-        kxarr = -kmax * (1 / mag - 2 * kx / kmax) / 2 + (kmax / (mag * M)) * np.arange(0, M)
+        resy = self._pyczt(in_arr, M[0], exp(-1j * 2 * pi / (mag[0] * M[0])), exp(-1j * pi * (1 / mag[0] - 2 * ky / kmax)))
+        res = self._pyczt(resy.T, M[1], exp(-1j * 2 * pi / (mag[1] * M[1])), exp(-1j * pi * (1 / mag[1] - 2 * kx / kmax))).T
+        kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * np.arange(0, M[0])
+        kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * np.arange(0, M[1])
         dim = np.shape(in_arr)
         # remove phase tilt from (0,0) offset in spatial domain
         res = res * (exp(1j * kyarr * dim[0] * pi / kmax)[:, np.newaxis])
-        res = res * (exp(1j * kxarr * dim[0] * pi / kmax)[np.newaxis, :])
+        res = res * (exp(1j * kxarr * dim[1] * pi / kmax)[np.newaxis, :])
         return res, kxarr, kyarr
 
     def _zoomf_cupy(self, in_arr, M, kx, ky, mag, kmax):
-        resy = self._pyczt_cupy(in_arr, M, cp.exp(-1j * 2 * pi / (mag * M)),
-                                cp.exp(-1j * pi * (1 / mag - 2 * ky / kmax)))
-        res = self._pyczt_cupy(resy.T, M, cp.exp(-1j * 2 * pi / (mag * M)),
-                               cp.exp(-1j * pi * (1 / mag - 2 * kx / kmax))).T
-        kyarr = -kmax * (1 / mag - 2 * ky / kmax) / 2 + (kmax / (mag * M)) * cp.arange(0, M)
-        kxarr = -kmax * (1 / mag - 2 * kx / kmax) / 2 + (kmax / (mag * M)) * cp.arange(0, M)
+        resy = self._pyczt_cupy(in_arr, M[0], cp.exp(-1j * 2 * pi / (mag[0] * M[0])),
+                                cp.exp(-1j * pi * (1 / mag[0] - 2 * ky / kmax)))
+        res = self._pyczt_cupy(resy.T, M[1], cp.exp(-1j * 2 * pi / (mag[1] * M[1])),
+                               cp.exp(-1j * pi * (1 / mag[1] - 2 * kx / kmax))).T
+        kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * cp.arange(0, M[0])
+        kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * cp.arange(0, M[1])
         dim = cupyx.scipy.sparse.csr_matrix.get_shape(in_arr)
         # remove phase tilt from (0,0) offset in spatial domain
         res = res * (cp.exp(1j * kyarr * dim[0] * pi / kmax)[:, cp.newaxis])
-        res = res * (cp.exp(1j * kxarr * dim[0] * pi / kmax)[cp.newaxis, :])
+        res = res * (cp.exp(1j * kxarr * dim[1] * pi / kmax)[cp.newaxis, :])
         return res, kxarr, kyarr
 
     def _zoomf_pytorch(self, in_arr, M, kx, ky, mag, kmax):
-        resy = self._pyczt_pytorch(in_arr, M, torch.exp(torch.tensor(-1j * 2 * pi / (mag * M), device=self.tdev)),
-                                torch.exp(torch.tensor(-1j * pi * (1 / mag - 2 * ky / kmax), device=self.tdev)))
-        res = self._pyczt_pytorch(resy.T, M, torch.exp(torch.tensor(-1j * 2 * pi / (mag * M), device=self.tdev)),
-                               torch.exp(torch.tensor(-1j * pi * (1 / mag - 2 * kx / kmax), device=self.tdev))).T
-        kyarr = -kmax * (1 / mag - 2 * ky / kmax) / 2 + (kmax / (mag * M)) * torch.arange(0, M, device=self.tdev)
-        kxarr = -kmax * (1 / mag - 2 * kx / kmax) / 2 + (kmax / (mag * M)) * torch.arange(0, M, device=self.tdev)
+        resy = self._pyczt_pytorch(in_arr, M[0], torch.exp(torch.tensor(-1j * 2 * pi / (mag[0] * M[0]), device=self.tdev)),
+                                torch.exp(torch.tensor(-1j * pi * (1 / mag[0] - 2 * ky / kmax), device=self.tdev)))
+        res = self._pyczt_pytorch(resy.T, M[1], torch.exp(torch.tensor(-1j * 2 * pi / (mag[1] * M[1]), device=self.tdev)),
+                               torch.exp(torch.tensor(-1j * pi * (1 / mag[1] - 2 * kx / kmax), device=self.tdev))).T
+        kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
+        kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * torch.arange(0, M[1], device=self.tdev)
         dim = in_arr.shape
         # remove phase tilt from (0,0) offset in spatial domain
         res = res * torch.unsqueeze(torch.exp(1j * kyarr * dim[0] * pi / kmax), 1)
-        res = res * torch.unsqueeze(torch.exp(1j * kxarr * dim[0] * pi / kmax), 0)
+        res = res * torch.unsqueeze(torch.exp(1j * kxarr * dim[1] * pi / kmax), 0)
         return res, kxarr, kyarr
 
     def _att(self, kr):

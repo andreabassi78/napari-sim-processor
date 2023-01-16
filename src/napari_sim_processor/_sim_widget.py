@@ -281,8 +281,8 @@ class SimAnalysis(QWidget):
             raise(KeyError('Please select a 5D(angle,phase,z,y,x) stack'))
         self.imageRaw_name = image.name
         sa,sp,sz,sy,sx = image.data.shape
-        if not sy == sx:
-            raise(KeyError('Non-square images are not supported'))
+        # if not sy == sx:
+        #     raise(KeyError('Non-square images are not supported'))
         self.angles_number.val = sa
         self.phases_number.val = sp
         self.viewer.dims.axis_labels = ["angle", "phase", "z", "y","x"]
