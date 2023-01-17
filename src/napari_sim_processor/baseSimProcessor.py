@@ -123,8 +123,6 @@ class BaseSimProcessor:
         assert len(img) > self._nsteps - 1
         self.empty_cache()
         self.Ny, self.Nx = img[0, :, :].shape
-        assert self.Nx % 2 == 0
-        assert self.Ny % 2 == 0
         if self.Nx != self._lastN[0] and self.Ny != self._lastN[1]:
             self._allocate_arrays()
 
@@ -477,8 +475,8 @@ class BaseSimProcessor:
         oversampling = res / dx
         dkx = oversampling / (Nx / 2)  # Sampling in frequency plane
         dky = oversampling / (Ny / 2)  # Sampling in frequency plane
-        kx = torch.arange(-Nx // 2, Nx // 2, dtype=torch.float32, device=self.tdev) * dkx
-        ky = torch.arange(-Ny // 2, Ny // 2, dtype=torch.float32, device=self.tdev) * dky
+        kx = torch.arange(-Nx / 2, Nx / 2, dtype=torch.float32, device=self.tdev) * dkx
+        ky = torch.arange(-Ny / 2, Ny / 2, dtype=torch.float32, device=self.tdev) * dky
         kr = torch.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2)
         M = torch.linalg.pinv(torch.as_tensor(self._get_band_construction_matrix(), dtype=torch.complex64, device=self.tdev))
 
@@ -884,7 +882,7 @@ class BaseSimProcessor:
             reconfactor_cp = cp.array(self._reconfactor)
             for i in range(0, nim, self._nsteps):
                 bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
-                bcarray[:, 3 * self.Ny // 2:2 * self.Nx, 0:self.Ny // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
+                bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
                                                                             0:self.Nx // 2 + 1]
                 img2[i:i + self._nsteps, :, :] = cp.fft.irfft2(bcarray) * reconfactor_cp
 
