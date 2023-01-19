@@ -8,15 +8,17 @@ import matplotlib.patches as patches
 
 try:
     import torch
+
     pytorch = True
     print('pytorch found')
 except ModuleNotFoundError as err:
-    #print(err)
+    # print(err)
     pytorch = False
 
 try:
     import pyfftw
     import pyfftw.interfaces.numpy_fft as fft
+
     pyfftw.config.NUM_THREADS = multiprocessing.cpu_count()
     pyfftw.interfaces.cache.enable()
     fftw = True
@@ -44,37 +46,40 @@ try:
 except:
     cupy = False
 
+
 class BaseSimProcessor:
     Nx = 256  # points to use in fft
     Ny = 256
     pixelsize = 6.5  # camera pixel size, um
     magnification = 60  # objective magnification
-    NA = 1.1        # numerial aperture at sample
-    n = 1.33        # refractive index at sample
+    NA = 1.1  # numerial aperture at sample
+    n = 1.33  # refractive index at sample
     wavelength = 0.488  # wavelength, um
-    alpha = 0.3     # zero order attenuation width
-    beta = 0.95     # zero order attenuation
-    w = 0.3         # Wiener parameter
-    eta = 0.75      # eta is the factor by which the illumination grid frequency
-    a = 0.25         # otf attenuation factor (a = 1 gives no correction)
-    a_type = 'none'   # otf attenuation type ( 'exp' or 'sph' or 'none')
+    alpha = 0.3  # zero order attenuation width
+    beta = 0.95  # zero order attenuation
+    w = 0.3  # Wiener parameter
+    eta = 0.75  # eta is the factor by which the illumination grid frequency
+    a = 0.25  # otf attenuation factor (a = 1 gives no correction)
+    a_type = 'none'  # otf attenuation type ( 'exp' or 'sph' or 'none')
     # exceeds the incoherent cutoff, eta=1 for normal SIM, eta=sqrt(3)/2 to maximise
     # resolution without zeros in TF carrier is 2*kmax*eta
-    debug = True    # Set to False (or 0) for no debug information,
-                    # to True (or 1) for minimal information,
-                    # to integers > 1 for extra information
-    tdev = None     # torch device to use - if none, then will choose gpu if available and cpu otherwise.
-    usePhases = False   # Whether to measure and use individual phases in calibration/reconstruction
-    _lastN = (0, 0)      # To track changes in array size that will force array re-allocation
-    _M = None       # Mand reconstruction matrix
+    debug = True  # Set to False (or 0) for no debug information,
+    # to True (or 1) for minimal information,
+    # to integers > 1 for extra information
+    tdev = None  # torch device to use - if none, then will choose gpu if available and cpu otherwise.
+    usePhases = False  # Whether to measure and use individual phases in calibration/reconstruction
+    _lastN = (0, 0)  # To track changes in array size that will force array re-allocation
+    _M = None  # Mand reconstruction matrix
+    _nbands = 0  # Number of bands (overridden in derived classes
+    _nsteps = 0  # Number of steps (overridden in derived classes
 
     def __init__(self):
         # self._nsteps = 0
         # self._nbands = 0
-        self.kx = np.zeros((self._nbands, 1), dtype=np.single)
-        self.ky = np.zeros((self._nbands, 1), dtype=np.single)
-        self.p = np.zeros((self._nbands, 1), dtype=np.single)
-        self.ampl = np.zeros((self._nbands, 1), dtype=np.single)
+        self.kx = np.zeros(self._nbands, dtype=np.single)
+        self.ky = np.zeros(self._nbands, dtype=np.single)
+        self.p = np.zeros(self._nbands, dtype=np.single)
+        self.ampl = np.zeros(self._nbands, dtype=np.single)
 
     def _allocate_arrays(self):
         """ define matrix """
@@ -96,7 +101,8 @@ class BaseSimProcessor:
                     self.tdev = torch.device('cuda')
                 else:
                     self.tdev = torch.device('cpu')
-            self._carray_torch = torch.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=torch.complex64, device=self.tdev)
+            self._carray_torch = torch.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=torch.complex64,
+                                             device=self.tdev)
             self._bigimgstore_torch = torch.zeros((2 * self.Ny, 2 * self.Nx), dtype=torch.float32, device=self.tdev)
         if opencv:
             self._prefilter_ocv = np.zeros((self.Ny, self.Nx),
@@ -138,16 +144,17 @@ class BaseSimProcessor:
         self._dx2 = self._dx / 2
         self._dy2 = self._dx2
 
-        self._kr = np.sqrt(self._kx ** 2 + self._ky[:,np.newaxis] ** 2, dtype=np.single)
+        self._kr = np.sqrt(self._kx ** 2 + self._ky[:, np.newaxis] ** 2, dtype=np.single)
         kxbig = np.arange(-self.Nx, self.Nx, dtype=np.single) * self._dkx
         kybig = np.arange(-self.Ny, self.Ny, dtype=np.single) * self._dky
-        kybig = kybig[:,np.newaxis]
+        kybig = kybig[:, np.newaxis]
 
         '''Sum input images if there are more than self._nsteps'''
         if len(img) > self._nsteps:
             imgs = np.zeros((self._nsteps, self.Ny, self.Nx), dtype=np.single)
             for i in range(self._nsteps):
-                imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0, dtype = np.single)
+                imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0,
+                                       dtype=np.single)
         else:
             imgs = np.single(img)
 
@@ -157,19 +164,21 @@ class BaseSimProcessor:
         wienerfilter = np.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
 
         if useTorch:
-            sum_prepared_comp = torch.einsum('ij,jkl->ikl', torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
-                                          torch.as_tensor(imgs, dtype=torch.complex64, device=self.tdev)).cpu().numpy()
+            sum_prepared_comp = torch.einsum('ij,jkl->ikl',
+                                             torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
+                                             torch.as_tensor(imgs, dtype=torch.complex64,
+                                                             device=self.tdev)).cpu().numpy()
         elif useCupy:
             sum_prepared_comp = cp.dot(cp.asarray(self._M[:self._nbands + 1, :]),
-                                           cp.asarray(imgs).transpose((1, 0, 2))).get()
+                                       cp.asarray(imgs).transpose((1, 0, 2))).get()
         else:
             sum_prepared_comp = np.dot(self._M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
 
         # find parameters
-        ckx = np.zeros((self._nbands, 1), dtype=np.single)
-        cky = np.zeros((self._nbands, 1), dtype=np.single)
-        p = np.zeros((self._nbands, 1), dtype=np.single)
-        ampl = np.zeros((self._nbands, 1), dtype=np.single)
+        ckx = np.zeros(self._nbands, dtype=np.single)
+        cky = np.zeros(self._nbands, dtype=np.single)
+        p = np.zeros(self._nbands, dtype=np.single)
+        ampl = np.zeros(self._nbands, dtype=np.single)
 
         if findCarrier:
             # minimum search radius in k-space
@@ -177,31 +186,33 @@ class BaseSimProcessor:
             for i in range(self._nbands):
                 if useTorch:
                     self.kx[i], self.ky[i] = self._coarseFindCarrier_pytorch(sum_prepared_comp[0, :, :],
-                                                            sum_prepared_comp[i + 1, :, :], mask1)
+                                                                             sum_prepared_comp[i + 1, :, :], mask1)
                 elif useCupy:
                     self.kx[i], self.ky[i] = self._coarseFindCarrier_cupy(sum_prepared_comp[0, :, :],
-                                                            sum_prepared_comp[i + 1, :, :], mask1)
+                                                                          sum_prepared_comp[i + 1, :, :], mask1)
                 else:
                     self.kx[i], self.ky[i] = self._coarseFindCarrier(sum_prepared_comp[0, :, :],
-                                                            sum_prepared_comp[i + 1, :, :], mask1)
+                                                                     sum_prepared_comp[i + 1, :, :], mask1)
         for i in range(self._nbands):
             if useTorch:
                 ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier_pytorch(sum_prepared_comp[0, :, :],
-                                                                    sum_prepared_comp[i + 1, :, :], self.kx[i],
-                                                                    self.ky[i])
+                                                                            sum_prepared_comp[i + 1, :, :], self.kx[i],
+                                                                            self.ky[i])
             elif useCupy:
                 ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier_cupy(sum_prepared_comp[0, :, :],
-                                                                    sum_prepared_comp[i + 1, :, :], self.kx[i],
-                                                                    self.ky[i])
+                                                                         sum_prepared_comp[i + 1, :, :], self.kx[i],
+                                                                         self.ky[i])
             else:
                 ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier(sum_prepared_comp[0, :, :],
                                                                     sum_prepared_comp[i + 1, :, :], self.kx[i],
                                                                     self.ky[i])
 
-        self.kx = ckx # store found kx, ky, p and ampl values
+        self.kx = ckx  # store found kx, ky, p and ampl values
         self.ky = cky
         self.p = p
         self.ampl = ampl
+
+        print(self.kx.__repr__())
 
         if self.debug:
             print(f'kx = {tuple(ckx.flat)}')
@@ -224,11 +235,13 @@ class BaseSimProcessor:
             if useTorch:
                 sum_prepared_comp = torch.einsum('ij,jkl->ikl',
                                                  torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
-                                                 torch.as_tensor(imgs, dtype=torch.complex64, device=self.tdev) + 0 * 1j).cpu().numpy()
+                                                 torch.as_tensor(imgs, dtype=torch.complex64,
+                                                                 device=self.tdev) + 0 * 1j).cpu().numpy()
             elif useCupy:
-                sum_prepared_comp = cp.dot(cp.asarray(self._M[:self._nbands+1, :]), cp.asarray(imgs).transpose((1, 0, 2))).get()
+                sum_prepared_comp = cp.dot(cp.asarray(self._M[:self._nbands + 1, :]),
+                                           cp.asarray(imgs).transpose((1, 0, 2))).get()
             else:
-                sum_prepared_comp = np.dot(self._M[:self._nbands+1, :], imgs.transpose((1, 0, 2)))
+                sum_prepared_comp = np.dot(self._M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
 
             for i in range(self._nbands):
                 if useTorch:
@@ -264,8 +277,11 @@ class BaseSimProcessor:
             Acp = torch.as_tensor(ampl, device=self.tdev)
             for i in range(self._nsteps):
                 self._reconfactor[i, :, :] = (Mcp[0, i].real + torch.sum(torch.stack([torch.outer(
-                    torch.exp(torch.as_tensor(1j * (ph * cky[j] * yy + p[j]), device=self.tdev)) * (Mcp[j + 1, i] * 4 / Acp[j]),
-                    torch.exp(torch.as_tensor(1j * ph * ckx[j] * xx, device=self.tdev))).real for j in range(self._nbands)]), 0)).cpu().numpy()
+                    torch.exp(torch.as_tensor(1j * (ph * cky[j] * yy + p[j]), device=self.tdev)) * (
+                                Mcp[j + 1, i] * 4 / Acp[j]),
+                    torch.exp(torch.as_tensor(1j * ph * ckx[j] * xx, device=self.tdev))).real for j in
+                                                                                      range(self._nbands)]),
+                                                                         0)).cpu().numpy()
         elif useCupy:
             Mcp = cp.asarray(self._M)
             Acp = cp.asarray(ampl)
@@ -286,7 +302,7 @@ class BaseSimProcessor:
             for i in range(self._nsteps):
                 plt.figure()
                 plt.title(f'reconfactor[{i}]')
-                plt.imshow(self._reconfactor[i,500:540,500:540])
+                plt.imshow(self._reconfactor[i, 500:540, 500:540])
 
         # calculate pre-filter factors
 
@@ -313,11 +329,11 @@ class BaseSimProcessor:
             wienerfilter[mask] = wienerfilter[mask] + (self._tf(krbig[mask]) ** 2) * self._att(krbig[mask])
             np.seterr(invalid='ignore')  # Silence sqrt warnings for kmaxth calculations
             kmaxth = np.fmax(kmaxth, np.fmax(ckx[i] * np.cos(th) + cky[i] * np.sin(th) +
-                                        np.sqrt(4 - (ckx[i] * np.sin(th)) ** 2 - (cky[i] * np.cos(th)) ** 2 +
-                                                ckx[i] * cky[i] * np.sin(2 * th)),
-                                        - ckx[i] * np.cos(th) - cky[i] * np.sin(th) +
-                                        np.sqrt(4 - (ckx[i] * np.sin(th)) ** 2 - (cky[i] * np.cos(th)) ** 2 +
-                                                ckx[i] * cky[i] * np.sin(2 * th))))
+                                             np.sqrt(4 - (ckx[i] * np.sin(th)) ** 2 - (cky[i] * np.cos(th)) ** 2 +
+                                                     ckx[i] * cky[i] * np.sin(2 * th)),
+                                             - ckx[i] * np.cos(th) - cky[i] * np.sin(th) +
+                                             np.sqrt(4 - (ckx[i] * np.sin(th)) ** 2 - (cky[i] * np.cos(th)) ** 2 +
+                                                     ckx[i] * cky[i] * np.sin(2 * th))))
             np.seterr(invalid=inv)
         if self.debug:
             plt.figure()
@@ -334,15 +350,15 @@ class BaseSimProcessor:
                                 torch.as_tensor(kxbig, device=self.tdev, dtype=torch.float32))
             kmaxth_pt = torch.as_tensor(kmaxth, device=self.tdev)
             th_pt = torch.as_tensor(th, device=self.tdev)
-            dth = th[1]-th[0]
+            dth = th[1] - th[0]
             starti = torch.floor((theta + pi) / dth).long()
             start = kmaxth_pt[starti]
-            end = kmaxth_pt[(starti+1) % (thsteps - 1)]
+            end = kmaxth_pt[(starti + 1) % (thsteps - 1)]
             weight = (theta - th_pt[starti]) / dth
             kmax = torch.lerp(start, end, weight).cpu().numpy()
         elif useCupy and 'interp' in dir(cp):  # interp not available in cupy version < 9.0.0
             kmax = cp.interp(cp.arctan2(cp.asarray(kybig), cp.asarray(kxbig)), cp.asarray(th), cp.asarray(kmaxth),
-                                 period=2 * pi).astype(np.single).get()
+                             period=2 * pi).astype(np.single).get()
         else:
             kmax = np.interp(np.arctan2(kybig, kxbig), th, kmaxth, period=2 * pi).astype(np.single)
 
@@ -352,7 +368,7 @@ class BaseSimProcessor:
             plt.imshow(wienerfilter)
             plt.figure()
             plt.title('output apodisation')
-            plt.imshow(mtot * self._tf(1.99 * krbig * mtot / kmax, a_type = 'none'))
+            plt.imshow(mtot * self._tf(1.99 * krbig * mtot / kmax, a_type='none'))
 
         if useTorch:
             mtot_pt = torch.as_tensor(mtot, device=self.tdev)
@@ -360,14 +376,14 @@ class BaseSimProcessor:
             kmax_pt = torch.as_tensor(kmax, device=self.tdev)
             wienerfilter_pt = torch.as_tensor(wienerfilter, device=self.tdev)
             wienerfilter = (mtot_pt * self._tf_pytorch(1.99 * krbig_pt * mtot_pt / kmax_pt, a_type='none') /
-                           (wienerfilter_pt * mtot_pt + self.w ** 2)).cpu().numpy()
+                            (wienerfilter_pt * mtot_pt + self.w ** 2)).cpu().numpy()
         elif useCupy:
             mtot_cp = cp.asarray(mtot)
             wienerfilter = (mtot_cp * self._tf_cupy(1.99 * cp.asarray(krbig) * mtot_cp / cp.asarray(kmax),
                                                     a_type='none') /
                             (cp.asarray(wienerfilter) * mtot_cp + self.w ** 2)).get()
         else:
-            wienerfilter = mtot * self._tf(1.99 * krbig * mtot / kmax, a_type = 'none') / \
+            wienerfilter = mtot * self._tf(1.99 * krbig * mtot / kmax, a_type='none') / \
                            (wienerfilter * mtot + self.w ** 2)
         self._postfilter = fft.fftshift(wienerfilter)
 
@@ -412,8 +428,8 @@ class BaseSimProcessor:
         else:
             imgs = np.single(img)
         sum_prepared_comp = np.dot(M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_min_radius = self.eta / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
         motf = fft.fftshift(maskbpf / (self._tfm(kr, maskbpf) + (1 - maskbpf) * 0.0001))
@@ -450,8 +466,8 @@ class BaseSimProcessor:
         else:
             imgs = cp.asarray(img, dtype=cp.single)
         sum_prepared_comp = cp.dot(M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_min_radius = self.eta / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
         motf = fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
@@ -478,7 +494,8 @@ class BaseSimProcessor:
         kx = torch.arange(-Nx / 2, Nx / 2, dtype=torch.float32, device=self.tdev) * dkx
         ky = torch.arange(-Ny / 2, Ny / 2, dtype=torch.float32, device=self.tdev) * dky
         kr = torch.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2)
-        M = torch.linalg.pinv(torch.as_tensor(self._get_band_construction_matrix(), dtype=torch.complex64, device=self.tdev))
+        M = torch.linalg.pinv(
+            torch.as_tensor(self._get_band_construction_matrix(), dtype=torch.complex64, device=self.tdev))
 
         if len(img) > self._nsteps:
             imgs = torch.zeros((self._nsteps, Ny, Nx), dtype=torch.float32, device=self.tdev)
@@ -487,9 +504,9 @@ class BaseSimProcessor:
                 imgs[i, :, :] = torch.sum(imgt[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0)
         else:
             imgs = torch.as_tensor(np.float32(img), device=self.tdev)
-        sum_prepared_comp = torch.einsum('ij,jkl->ikl',M[:self._nbands + 1, :], imgs + 0 * 1j)
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        sum_prepared_comp = torch.einsum('ij,jkl->ikl', M[:self._nbands + 1, :], imgs + 0 * 1j)
+        otf_exclude_min_radius = self.eta / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
         motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
@@ -531,18 +548,18 @@ class BaseSimProcessor:
         assert pytorch, "No pytorch present"
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         wf_comp = torch.einsum('j,kjlm->klm',
-                                         torch.as_tensor(self._M[0, :], device=self.tdev),
-                                         torch.as_tensor(np.float32(imgr), dtype=torch.float32,
-                                                         device=self.tdev) + 0 * 1j).squeeze()
+                               torch.as_tensor(self._M[0, :], device=self.tdev),
+                               torch.as_tensor(np.float32(imgr), dtype=torch.float32,
+                                               device=self.tdev) + 0 * 1j).squeeze()
         return wf_comp.cpu().real.numpy()
 
     def filteredWFreconstruct_pytorch(self, img):
         assert pytorch, "No pytorch present"
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         wf_comp = torch.einsum('j,kjlm->klm',
-                                         torch.as_tensor(self._M[0, :], device=self.tdev),
-                                         torch.as_tensor(np.float32(imgr), dtype=torch.float32,
-                                                         device=self.tdev) + 0 * 1j).squeeze()
+                               torch.as_tensor(self._M[0, :], device=self.tdev),
+                               torch.as_tensor(np.float32(imgr), dtype=torch.float32,
+                                               device=self.tdev) + 0 * 1j).squeeze()
         filt = torch.fft.fftshift(torch.as_tensor(self._attm(self._kr, self._kr < 2), device=self.tdev))
         filtered_wf_comp = torch.fft.ifft2(torch.fft.fft2(wf_comp) * filt)
         return filtered_wf_comp.real.cpu().numpy()
@@ -550,7 +567,7 @@ class BaseSimProcessor:
     def OSreconstruct(self, img):
         imgr = img.reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         sum_prepared_comp = np.einsum('ij,kjlm->iklm', self._M[1:self._nbands + 1, :], imgr)
-        imgos = np.einsum('iklm,ij->klmj', np.abs(sum_prepared_comp), 1 / self.ampl).squeeze()
+        imgos = np.einsum('iklm,i->klm', np.abs(sum_prepared_comp), 1 / self.ampl).squeeze()
         return imgos
 
     def filteredOSreconstruct(self, img):
@@ -558,14 +575,14 @@ class BaseSimProcessor:
         sum_prepared_comp = np.einsum('ij,kjlm->iklm', self._M[1:self._nbands + 1, :], imgr)
         filt = fft.fftshift(self._attm(self._kr, self._kr < 2))
         filtered_comp = fft.ifft2(fft.fft2(sum_prepared_comp) * filt)
-        imgos = np.einsum('iklm,ij->klmj', np.abs(filtered_comp), 1 / self.ampl).squeeze()
+        imgos = np.einsum('iklm,i->klm', np.abs(filtered_comp), 1 / self.ampl).squeeze()
         return imgos
 
     def OSreconstruct_cupy(self, img):
         assert cupy, "No CuPy present"
         imgr = cp.asarray(img).reshape(img.shape[0] // self._nsteps, self._nsteps, img.shape[1], img.shape[2])
         sum_prepared_comp = cp.einsum('ij,kjlm->iklm', cp.asarray(self._M[1:self._nbands + 1, :]), imgr)
-        imgos = cp.einsum('iklm,ij->klmj', cp.abs(sum_prepared_comp), cp.asarray(1 / self.ampl)).squeeze()
+        imgos = cp.einsum('iklm,i->klm', cp.abs(sum_prepared_comp), cp.asarray(1 / self.ampl)).squeeze()
         return imgos.get()
 
     def filteredOSreconstruct_cupy(self, img):
@@ -574,7 +591,7 @@ class BaseSimProcessor:
         sum_prepared_comp = cp.einsum('ij,kjlm->iklm', cp.asarray(self._M[1:self._nbands + 1, :]), imgr)
         filt = cp.fft.fftshift(cp.asarray(self._attm(self._kr, self._kr < 2)))
         filtered_comp = cp.fft.ifft2(cp.fft.fft2(sum_prepared_comp) * filt)
-        imgos = cp.einsum('iklm,ij->klmj', cp.abs(filtered_comp), cp.asarray(1 / self.ampl)).squeeze()
+        imgos = cp.einsum('iklm,i->klm', cp.abs(filtered_comp), cp.asarray(1 / self.ampl)).squeeze()
         return imgos.get()
 
     def OSreconstruct_pytorch(self, img):
@@ -584,7 +601,8 @@ class BaseSimProcessor:
                                          torch.as_tensor(self._M[1:self._nbands + 1, :], device=self.tdev),
                                          torch.as_tensor(np.float32(imgr), dtype=torch.float32,
                                                          device=self.tdev) + 0 * 1j)
-        imgos = torch.einsum('iklm,ij->klmj', torch.abs(sum_prepared_comp), 1 / torch.as_tensor(self.ampl, device=self.tdev)).squeeze()
+        imgos = torch.einsum('iklm,i->klm', torch.abs(sum_prepared_comp),
+                             1 / torch.as_tensor(self.ampl, device=self.tdev)).squeeze()
         return imgos.cpu().numpy()
 
     def filteredOSreconstruct_pytorch(self, img):
@@ -596,16 +614,17 @@ class BaseSimProcessor:
                                                          device=self.tdev) + 0 * 1j)
         filt = torch.fft.fftshift(torch.as_tensor(self._attm(self._kr, self._kr < 2), device=self.tdev))
         filtered_comp = torch.fft.ifft2(torch.fft.fft2(sum_prepared_comp) * filt)
-        imgos = torch.einsum('iklm,ij->klmj', torch.abs(filtered_comp), 1 / torch.as_tensor(self.ampl, device=self.tdev)).squeeze()
+        imgos = torch.einsum('iklm,i->klm', torch.abs(filtered_comp),
+                             1 / torch.as_tensor(self.ampl, device=self.tdev)).squeeze()
         return imgos.cpu().numpy()
 
     def reconstruct_fftw(self, img):
         imf = fft.fft2(img) * self._prefilter
         self._carray[:, 0:self.Ny // 2, 0:self.Nx // 2] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2]
-        self._carray[:, 0:self.Ny // 2, 3 * self.Nx // 2:2 * self.Nx] = imf[:, 0:self.Ny // 2, self.Nx // 2:self.N]
+        self._carray[:, 0:self.Ny // 2, 3 * self.Nx // 2:2 * self.Nx] = imf[:, 0:self.Ny // 2, self.Nx // 2:self.Nx]
         self._carray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2] = imf[:, self.Ny // 2:self.Ny, 0:self.Nx // 2]
         self._carray[:, 3 * self.Ny // 2:2 * self.Ny, 3 * self.Nx // 2:2 * self.Nx] = imf[:, self.Ny // 2:self.Ny,
-                                                                                  self.Nx // 2:self.Nx]
+                                                                                      self.Nx // 2:self.Nx]
         img2 = np.sum(np.real(fft.ifft2(self._carray)).real * self._reconfactor, 0)
         self._imgstore = img.copy()
         self._bigimgstore = fft.ifft2(fft.fft2(img2) * self._postfilter).real
@@ -614,7 +633,8 @@ class BaseSimProcessor:
     def reconstruct_rfftw(self, img):
         imf = fft.rfft2(img) * self._prefilter[:, 0:self.Nx // 2 + 1]
         self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
-        self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[:, self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
+        self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[:, self.Ny // 2:self.Ny,
+                                                                             0:self.Nx // 2 + 1]
         img2 = np.sum(fft.irfft2(self._carray1) * self._reconfactor, 0)
         self._imgstore = img.copy()
         self._bigimgstore = fft.irfft2(fft.rfft2(img2) * self._postfilter[:, 0:self.Nx + 1])
@@ -642,12 +662,13 @@ class BaseSimProcessor:
             imf = cv2.multiply(cv2.dft(self._imgstoreU[i], flags=cv2.DFT_COMPLEX_OUTPUT), self._prefilter_ocvU)
             cv2.copyTo(src=cv2.UMat(imf, (0, 0, self.Ny // 2, self.Nx // 2)), mask=mask,
                        dst=cv2.UMat(self._carray_ocvU, (0, 0, self.Ny // 2, self.Nx // 2)))
-            cv2.copyTo(src=cv2.UMat(imf, (0, self.Nx // 2, self.Ny // 2, self.Nx// 2)), mask=mask,
+            cv2.copyTo(src=cv2.UMat(imf, (0, self.Nx // 2, self.Ny // 2, self.Nx // 2)), mask=mask,
                        dst=cv2.UMat(self._carray_ocvU, (0, 3 * self.Nx // 2, self.Ny // 2, self.Nx // 2)))
             cv2.copyTo(src=cv2.UMat(imf, (self.Ny // 2, 0, self.Ny // 2, self.Nx // 2)), mask=mask,
                        dst=cv2.UMat(self._carray_ocvU, (3 * self.Ny // 2, 0, self.Ny // 2, self.Nx // 2)))
             cv2.copyTo(src=cv2.UMat(imf, (self.Ny // 2, self.Nx // 2, self.Ny // 2, self.Nx // 2)), mask=mask,
-                       dst=cv2.UMat(self._carray_ocvU, (3 * self.Ny // 2, 3 * self.Nx // 2, self.Ny // 2, self.Nx // 2)))
+                       dst=cv2.UMat(self._carray_ocvU,
+                                    (3 * self.Ny // 2, 3 * self.Nx // 2, self.Ny // 2, self.Nx // 2)))
             img2 = cv2.add(img2, cv2.multiply(cv2.idft(self._carray_ocvU, flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT),
                                               self._reconfactorU[i]))
         self._bigimgstoreU = cv2.idft(cv2.multiply(cv2.dft(img2, flags=cv2.DFT_COMPLEX_OUTPUT), self._postfilter_ocvU),
@@ -660,7 +681,7 @@ class BaseSimProcessor:
         imf = cp.fft.rfft2(cp.asarray(img)) * cp.asarray(self._prefilter[:, 0:self.Nx // 2 + 1])
         self._carray_cp[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
         self._carray_cp[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[:, self.Ny // 2:self.Ny,
-                                                                            0:self.Nx // 2 + 1]
+                                                                               0:self.Nx // 2 + 1]
         del imf
         cp._default_memory_pool.free_all_blocks()
         img2 = cp.sum(cp.fft.irfft2(self._carray_cp) * cp.asarray(self._reconfactor), 0)
@@ -673,10 +694,11 @@ class BaseSimProcessor:
         assert torch, "No PyTorch present"
         img = np.float32(img)
         self._imgstore = img.copy()
-        imf = torch.fft.rfft2(torch.as_tensor(img, device=self.tdev)) * torch.as_tensor(self._prefilter[:, 0:self.Nx // 2 + 1], device=self.tdev)
+        imf = torch.fft.rfft2(torch.as_tensor(img, device=self.tdev)) * torch.as_tensor(
+            self._prefilter[:, 0:self.Nx // 2 + 1], device=self.tdev)
         self._carray_torch[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
         self._carray_torch[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[:, self.Ny // 2:self.Ny,
-                                                                            0:self.Nx // 2 + 1]
+                                                                                  0:self.Nx // 2 + 1]
         img2 = torch.sum(torch.fft.irfft2(self._carray_torch) * torch.as_tensor(self._reconfactor, device=self.tdev), 0)
         self._bigimgstore_torch = torch.fft.irfft2(torch.fft.rfft2(img2) * self._postfilter_torch[:, 0:self.Nx + 1])
         return self._bigimgstore_torch.cpu().numpy()
@@ -689,7 +711,7 @@ class BaseSimProcessor:
         self._carray[0, 0:self.Ny // 2, 3 * self.Nx // 2:2 * self.Nx] = imf[0:self.Ny // 2, self.Nx // 2:self.Nx]
         self._carray[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2]
         self._carray[0, 3 * self.Ny // 2:2 * self.Ny, 3 * self.Nx // 2:2 * self.Nx] = imf[self.Ny // 2:self.Ny,
-                                                                                  self.Nx // 2:self.Nx]
+                                                                                      self.Nx // 2:self.Nx]
         img2 = fft.ifft2(self._carray[0, :, :]).real * self._reconfactor[i, :, :]
         self._imgstore[i, :, :] = img.copy()
         self._bigimgstore = self._bigimgstore + fft.ifft2(fft.fft2(img2) * self._postfilter).real
@@ -699,7 +721,8 @@ class BaseSimProcessor:
         diff = img.astype(np.single) - self._imgstore[i, :, :].astype(np.single)
         imf = fft.rfft2(diff) * self._prefilter[:, 0:self.Nx // 2 + 1]
         self._carray1[0, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[0:self.Ny // 2, 0:self.Nx // 2 + 1]
-        self._carray1[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
+        self._carray1[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny,
+                                                                             0:self.Nx // 2 + 1]
         img2 = fft.irfft2(self._carray1[0, :, :]) * self._reconfactor[i, :, :]
         self._imgstore[i, :, :] = img.copy()
         self._bigimgstore = self._bigimgstore + fft.irfft2(fft.rfft2(img2) * self._postfilter[:, 0:self.Nx + 1])
@@ -737,8 +760,8 @@ class BaseSimProcessor:
         self._imgstoreU[i] = imU
         self._bigimgstoreU = cv2.add(self._bigimgstoreU,
                                      cv2.idft(cv2.multiply(cv2.dft(img2, flags=cv2.DFT_COMPLEX_OUTPUT),
-                                                               self._postfilter_ocvU)
-                                              , flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT))
+                                                           self._postfilter_ocvU),
+                                              flags=cv2.DFT_SCALE | cv2.DFT_REAL_OUTPUT))
         return self._bigimgstoreU
 
     def reconstructframe_cupy(self, img, i):
@@ -746,7 +769,8 @@ class BaseSimProcessor:
         diff = cp.asarray(img, dtype=np.single) - cp.asarray(self._imgstore[i, :, :], dtype=np.single)
         imf = cp.fft.rfft2(diff) * cp.asarray(self._prefilter[:, 0:self.Nx // 2 + 1])
         self._carray_cp[0, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[0:self.Ny // 2, 0:self.Nx // 2 + 1]
-        self._carray_cp[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
+        self._carray_cp[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny,
+                                                                               0:self.Nx // 2 + 1]
         img2 = cp.fft.irfft2(self._carray_cp[0, :, :]) * cp.asarray(self._reconfactor[i, :, :])
         self._bigimgstore_cp = self._bigimgstore_cp + cp.fft.irfft2(
             cp.fft.rfft2(img2) * self._postfilter_cp[:, 0:self.Nx + 1])
@@ -758,11 +782,14 @@ class BaseSimProcessor:
 
     def reconstructframe_pytorch(self, img, i):
         assert torch, "No CuPy present"
-        diff = torch.as_tensor(img, dtype=torch.float32, device=self.tdev) - torch.as_tensor(self._imgstore[i, :, :], device=self.tdev)
+        diff = torch.as_tensor(img, dtype=torch.float32, device=self.tdev) - torch.as_tensor(self._imgstore[i, :, :],
+                                                                                             device=self.tdev)
         imf = torch.fft.rfft2(diff) * torch.as_tensor(self._prefilter[:, 0:self.Nx // 2 + 1], device=self.tdev)
         self._carray_torch[0, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[0:self.Ny // 2, 0:self.Nx // 2 + 1]
-        self._carray_torch[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny, 0:self.Nx // 2 + 1]
-        img2 = torch.fft.irfft2(self._carray_torch[0, :, :]) * torch.as_tensor(self._reconfactor[i, :, :], device=self.tdev)
+        self._carray_torch[0, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[self.Ny // 2:self.Ny,
+                                                                                  0:self.Nx // 2 + 1]
+        img2 = torch.fft.irfft2(self._carray_torch[0, :, :]) * torch.as_tensor(self._reconfactor[i, :, :],
+                                                                               device=self.tdev)
         self._bigimgstore_torch = self._bigimgstore_torch + torch.fft.irfft2(
             torch.fft.rfft2(img2) * self._postfilter_torch[:, 0:self.Nx + 1])
         self._imgstore[i, :, :] = img.copy()
@@ -780,9 +807,11 @@ class BaseSimProcessor:
         imf = fft.rfft2(img) * self._prefilter[:, 0:self.Nx // 2 + 1]
         img2 = np.zeros([nim, 2 * self.Ny, 2 * self.Nx], dtype=np.single)
         for i in range(0, nim, self._nsteps):
-            self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
-            self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
-                                                                              0:self.Nx // 2 + 1]
+            self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2,
+                                                                   0:self.Nx // 2 + 1]
+            self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps,
+                                                                                 self.Ny // 2:self.Ny,
+                                                                                 0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = fft.irfft2(self._carray1) * self._reconfactor
         img3 = fft.irfft(fft.rfft(img2, nim, 0)[0:nimg // 2 + 1, :, :], nimg, 0)
         res = fft.irfft2(fft.rfft2(img3) * self._postfilter[:, :self.Nx + 1])
@@ -798,9 +827,11 @@ class BaseSimProcessor:
         imf = fft.rfft2(img) * self._prefilter[:, 0:self.Nx // 2 + 1]
         img2 = np.zeros([nim, 2 * self.Ny, 2 * self.Nx], dtype=np.single)
         for i in range(0, nim, self._nsteps):
-            self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
-            self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
-                                                                              0:self.Nx // 2 + 1]
+            self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2,
+                                                                   0:self.Nx // 2 + 1]
+            self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps,
+                                                                                 self.Ny // 2:self.Ny,
+                                                                                 0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = fft.irfft2(self._carray1) * self._reconfactor
         img3 = np.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
 
@@ -838,7 +869,7 @@ class BaseSimProcessor:
         for i in range(0, nim, self._nsteps):
             bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
             bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
-                                                                        0:self.Nx // 2 + 1]
+                                                                           0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = cp.fft.irfft2(bcarray) * reconfactor_cp
 
         del imf
@@ -881,16 +912,18 @@ class BaseSimProcessor:
             bcarray = cp.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=np.complex64)
             reconfactor_cp = cp.array(self._reconfactor)
             for i in range(0, nim, self._nsteps):
-                bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
-                bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
-                                                                            0:self.Nx // 2 + 1]
+                bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2,
+                                                                 0:self.Nx // 2 + 1]
+                bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps,
+                                                                               self.Ny // 2:self.Ny,
+                                                                               0:self.Nx // 2 + 1]
                 img2[i:i + self._nsteps, :, :] = cp.fft.irfft2(bcarray) * reconfactor_cp
 
             del bcarray
             del reconfactor_cp
 
             img3 = cp.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
-            for offs in range(0, 2*self.Ny - blocksize, blocksize):
+            for offs in range(0, 2 * self.Ny - blocksize, blocksize):
                 imf = cp.fft.rfft(img2[:, offs:offs + blocksize, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
                 img3[:, offs:offs + blocksize, 0:2 * self.Nx] = cp.fft.irfft(imf, nimg, 0)
             imf = cp.fft.rfft(img2[:, offs + blocksize:2 * self.Ny, 0:2 * self.Nx], nim, 0)[:nimg // 2 + 1, :, :]
@@ -907,7 +940,7 @@ class BaseSimProcessor:
         assert cupy, "No CuPy present"
         res = self._batchreconstructcompactworker_cupy(img, blocksize=blocksize)
         cp.get_default_memory_pool().free_all_blocks()
-        assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
+        assert not isinstance(res, str), res  # if something went wrong in the worker function then a string is returned
         return res
 
     def _batchreconstructcompactworker_pytorch(self, img, blocksize=128):
@@ -926,9 +959,11 @@ class BaseSimProcessor:
             bcarray = torch.zeros((self._nsteps, 2 * self.Ny, self.Nx + 1), dtype=torch.complex64, device=self.tdev)
             reconfactor_pt = torch.as_tensor(self._reconfactor, device=self.tdev)
             for i in range(0, nim, self._nsteps):
-                bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
-                bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
-                                                                            0:self.Nx // 2 + 1]
+                bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2,
+                                                                 0:self.Nx // 2 + 1]
+                bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps,
+                                                                               self.Ny // 2:self.Ny,
+                                                                               0:self.Nx // 2 + 1]
                 img2[i:i + self._nsteps, :, :] = torch.fft.irfft2(bcarray) * reconfactor_pt
 
             img3 = torch.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=torch.float32, device=self.tdev)
@@ -949,7 +984,7 @@ class BaseSimProcessor:
         res = self._batchreconstructcompactworker_pytorch(img, blocksize=blocksize)
         if torch.has_cuda:
             torch.cuda.empty_cache()
-        assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
+        assert not isinstance(res, str), res  # if something went wrong in the worker function then a string is returned
         return res
 
     def batchreconstruct_pytorch(self, img):
@@ -973,7 +1008,7 @@ class BaseSimProcessor:
         for i in range(0, nim, self._nsteps):
             bcarray[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2, 0:self.Nx // 2 + 1]
             bcarray[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
-                                                                        0:self.Nx // 2 + 1]
+                                                                           0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = torch.fft.irfft2(bcarray) * reconfactor_pt
 
         img3 = torch.fft.irfft(torch.fft.rfft(img2, nim, 0)[0:nimg // 2 + 1, :, :], nimg, 0)
@@ -1017,8 +1052,10 @@ class BaseSimProcessor:
             kr = torch.as_tensor(self._kr, device=self.tdev)
             otf = torch.ones((self.Ny, self.Nx), dtype=torch.float32, device=self.tdev)
             imgnsum = torch.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype=torch.float32, device=self.tdev)
-            xx = torch.arange(-self.Nx / 2 * self._dx, self.Nx / 2 * self._dx, self._dx, dtype=torch.float64, device=self.tdev)
-            yy = torch.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=torch.float64, device=self.tdev)
+            xx = torch.arange(-self.Nx / 2 * self._dx, self.Nx / 2 * self._dx, self._dx, dtype=torch.float64,
+                              device=self.tdev)
+            yy = torch.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=torch.float64,
+                              device=self.tdev)
             (TF, FFT, xp) = (self._tf_pytorch, torch.fft, torch)
         elif useCupy:
             img = cp.asarray(img, dtype=cp.float32)
@@ -1031,8 +1068,8 @@ class BaseSimProcessor:
         else:
             img = np.float32(img)
             kr = self._kr
-            otf = np.ones((self.Ny, self.Nx), dtype = np.float32)
-            imgnsum = np.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype = np.single)
+            otf = np.ones((self.Ny, self.Nx), dtype=np.float32)
+            imgnsum = np.zeros((self._nsteps, img.shape[1], img.shape[2]), dtype=np.single)
             xx = np.arange(-self.Nx / 2 * self._dx, self.Nx / 2 * self._dx, self._dx, dtype=np.double)
             yy = np.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=np.double)
             (TF, FFT, xp) = (self._tf, np.fft, np)
@@ -1055,32 +1092,35 @@ class BaseSimProcessor:
         phase_shift_to_ypeak = xp.exp(1j * ky * yy * 2 * pi * self.NA / self.wavelength)
         scaling = 1 / xp.sum(p0 * p0.conj())
         cross_corr_result = xp.sum(p * p0 * xp.outer(
-                        phase_shift_to_ypeak, phase_shift_to_xpeak), axis = (1,2)) * scaling
+            phase_shift_to_ypeak, phase_shift_to_xpeak), axis=(1, 2)) * scaling
 
         if self.debug > 1:
             plt.figure()
             plt.title('Find phase')
             if useTorch:
-                plt.imshow(xp.sqrt(xp.abs(FFT.fftshift(FFT.fft2(p[0, :, :] * p0)))).cpu().numpy(), cmap=plt.get_cmap('gray'))
+                plt.imshow(xp.sqrt(xp.abs(FFT.fftshift(FFT.fft2(p[0, :, :] * p0)))).cpu().numpy(),
+                           cmap=plt.get_cmap('gray'))
             elif useCupy:
                 plt.imshow(xp.sqrt(xp.abs(FFT.fftshift(FFT.fft2(p[0, :, :] * p0)))).get, cmap=plt.get_cmap('gray'))
             else:
                 plt.imshow(xp.sqrt(xp.abs(FFT.fftshift(FFT.fft2(p[0, :, :] * p0)))), cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            pxc0 = np.int(np.round(kx / self._dkx) + self.N / 2)
-            pyc0 = np.int(np.round(ky / self._dky) + self.N / 2)
+            pxc0 = np.int32(np.round(kx / self._dkx + self.Nx / 2))
+            pyc0 = np.int32(np.round(ky / self._dky + self.Ny / 2))
             circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
             mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
             if useTorch:
-                ixfz, Kx, Ky = self._zoomf(p0.cpu().numpy() * p[0, :, :].cpu().numpy(), (self.Ny, self.Nx), np.single(kx), np.single(ky), mag,
-                                       self._dkx * self.Nx)
+                ixfz, Kx, Ky = self._zoomf(p0.cpu().numpy() * p[0, :, :].cpu().numpy(), (self.Ny, self.Nx),
+                                           np.single(kx), np.single(ky), mag,
+                                           self._dkx * self.Nx)
             elif useCupy:
-                ixfz, Kx, Ky = self._zoomf(p0.get() * p[0, :, :].get(), (self.Ny, self.Nx), np.single(kx), np.single(ky), mag,
-                                       self._dkx * self.Nx)
+                ixfz, Kx, Ky = self._zoomf(p0.get() * p[0, :, :].get(), (self.Ny, self.Nx), np.single(kx),
+                                           np.single(ky), mag,
+                                           self._dkx * self.Nx)
             else:
                 ixfz, Kx, Ky = self._zoomf(p0 * p[0, :, :], (self.Ny, self.Nx), np.single(kx), np.single(ky), mag,
-                                       self._dkx * self.Nx)
+                                           self._dkx * self.Nx)
             plt.figure()
             plt.title('Zoom Find phase')
             plt.imshow(abs(ixfz.squeeze()))
@@ -1104,8 +1144,8 @@ class BaseSimProcessor:
             return phase, ampl
 
     def _coarseFindCarrier(self, band0, band1, mask):
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_min_radius = self.eta / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (self._kr > otf_exclude_min_radius) & (self._kr < otf_exclude_max_radius)
 
         motf = fft.fftshift(maskbpf / (self._tfm(self._kr, maskbpf) + (1 - maskbpf) * 0.0001))
@@ -1125,20 +1165,22 @@ class BaseSimProcessor:
         if self.debug:
             plt.figure()
             plt.title('Find carrier')
-            plt.imshow(ixf, cmap = plt.get_cmap('gray'))
+            plt.imshow(ixf, cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
+            circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
-            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky,
+                                     color='green', fill=False)
             ax.add_artist(circle)
-            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=3.8 * self.eta / self._dkx, height=3.8 * self.eta / self._dky, color='cyan', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=3.8 * self.eta / self._dkx,
+                                     height=3.8 * self.eta / self._dky, color='cyan', fill=False)
             ax.add_artist(circle)
 
         return kx, ky
 
     def _refineCarrier(self, band0, band1, kx_in, ky_in):
-        pxc0 = np.int(np.round(kx_in / self._dkx) + self.Nx // 2)
-        pyc0 = np.int(np.round(ky_in / self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in / self._dkx + self.Nx / 2))
+        pyc0 = np.int32(np.round(ky_in / self._dky + self.Ny / 2))
 
         otf_exclude_min_radius = self.eta / 2
         otf_exclude_max_radius = self.eta * 2
@@ -1148,7 +1190,7 @@ class BaseSimProcessor:
 
         otf_mask = (self._kr > otf_exclude_min_radius) & (self._kr < otf_exclude_max_radius)
         otf_mask_for_band_common_freq = fft.fftshift(
-            otf_mask & scipy.ndimage.shift(otf_mask, (pyc0 - (self.Ny // 2 ), pxc0 - (self.Nx // 2 )), order=0))
+            otf_mask & scipy.ndimage.shift(otf_mask, (pyc0 - (self.Ny // 2), pxc0 - (self.Nx // 2)), order=0))
 
         if self.debug:
             plt.figure()
@@ -1165,15 +1207,17 @@ class BaseSimProcessor:
             ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(band))))
             plt.figure()
             plt.title('Find carrier')
-            plt.imshow(ixf, cmap = plt.get_cmap('gray'))
+            plt.imshow(ixf, cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
+            circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
-            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky,
+                                     color='green', fill=False)
             ax.add_artist(circle)
 
         mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
-        ixfz, Kx, Ky = self._zoomf(band, (self.Nx, self.Ny), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag , self._dkx * self.Nx)
+        ixfz, Kx, Ky = self._zoomf(band, (self.Nx, self.Ny), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag,
+                                   self._dkx * self.Nx)
         pyc, pxc = self._findPeak(abs(ixfz))
 
         if self.debug:
@@ -1194,7 +1238,7 @@ class BaseSimProcessor:
 
         scaling = 1 / np.sum(band0_common * np.conjugate(band0_common))
         cross_corr_result = np.sum(band0_common * band1_common * np.outer(
-                        phase_shift_to_ypeak, phase_shift_to_xpeak)) * scaling
+            phase_shift_to_ypeak, phase_shift_to_xpeak)) * scaling
 
         ampl = np.abs(cross_corr_result) * 2
         phase = np.angle(cross_corr_result)
@@ -1206,8 +1250,8 @@ class BaseSimProcessor:
         mask = cp.asarray(mask)
         kr = cp.asarray(self._kr)
 
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_min_radius = self.eta / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
         motf = cp.fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
@@ -1234,16 +1278,16 @@ class BaseSimProcessor:
         band0 = cp.asarray(band0)
         band1 = cp.asarray(band1)
 
-        pxc0 = np.int(np.round(kx_in/self._dkx) + self.Nx // 2)
-        pyc0 = np.int(np.round(ky_in/self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in / self._dkx + self.Nx / 2))
+        pyc0 = np.int32(np.round(ky_in / self._dky + self.Ny / 2))
 
-        otf_exclude_min_radius = self.eta/2
+        otf_exclude_min_radius = self.eta / 2
         otf_exclude_max_radius = 1.5
 
         # kr = cp.sqrt(cp.asarray(self._kx) ** 2 + cp.asarray(self._ky) ** 2)
         kr = cp.asarray(self._kr, dtype=np.double)
         m = (kr < 2)
-        otf = cp.fft.fftshift(self._tfm_cupy(kr, m) + (1 - m)*0.0001)
+        otf = cp.fft.fftshift(self._tfm_cupy(kr, m) + (1 - m) * 0.0001)
 
         otf_mask = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
         otf_mask_for_band_common_freq = cp.fft.fftshift(
@@ -1255,7 +1299,8 @@ class BaseSimProcessor:
         band = band0_common * band1_common
 
         mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
-        ixfz, Kx, Ky = self._zoomf_cupy(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
+        ixfz, Kx, Ky = self._zoomf_cupy(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]),
+                                        mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_cupy(abs(ixfz))
 
         if self.debug:
@@ -1263,9 +1308,10 @@ class BaseSimProcessor:
             plt.title('Zoom Find carrier')
             plt.imshow(abs(ixfz.get()))
             ax = plt.gca()
-            circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
+            circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
-            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky,
+                                     color='green', fill=False)
             ax.add_artist(circle)
 
         kx = Kx[pxc]
@@ -1291,8 +1337,8 @@ class BaseSimProcessor:
         mask = torch.as_tensor(mask, device=self.tdev)
         kr = torch.as_tensor(self._kr, device=self.tdev)
 
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_min_radius = self.eta / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
         motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
@@ -1312,9 +1358,10 @@ class BaseSimProcessor:
             plt.title('Find carrier')
             plt.imshow(ixf.cpu().numpy(), cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
+            circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
-            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky,
+                                     color='green', fill=False)
             ax.add_artist(circle)
 
         return kx, ky
@@ -1323,8 +1370,8 @@ class BaseSimProcessor:
         band0 = torch.as_tensor(band0, device=self.tdev)
         band1 = torch.as_tensor(band1, device=self.tdev)
 
-        pxc0 = np.int(np.round(kx_in/self._dkx) + self.Nx // 2)
-        pyc0 = np.int(np.round(ky_in/self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in / self._dkx + self.Nx // 2))
+        pyc0 = np.int32(np.round(ky_in / self._dky + self.Ny // 2))
 
         otf_exclude_min_radius = self.eta / 2
         otf_exclude_max_radius = self.eta * 2
@@ -1332,11 +1379,11 @@ class BaseSimProcessor:
         # kr = cp.sqrt(cp.asarray(self._kx) ** 2 + cp.asarray(self._ky) ** 2)
         kr = torch.as_tensor(self._kr, dtype=torch.float, device=self.tdev)
         m = (kr < 2)
-        otf = torch.fft.fftshift(self._tfm_pytorch(kr, m) + (~m)*0.0001)
+        otf = torch.fft.fftshift(self._tfm_pytorch(kr, m) + (~m) * 0.0001)
 
         otf_mask = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
-        shiftx = pxc0 - (self.Nx // 2)
-        shifty = pyc0 - (self.Ny // 2)
+        shiftx = int(pxc0 - (self.Nx // 2))
+        shifty = int(pyc0 - (self.Ny // 2))
         otf_mask_shifted = torch.roll(otf_mask, shifts=(shifty, shiftx), dims=(0, 1))
         if shiftx < 0:
             otf_mask_shifted[:, shiftx:] = False
@@ -1362,15 +1409,17 @@ class BaseSimProcessor:
             ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(band.cpu().numpy()))))
             plt.figure()
             plt.title('Find carrier')
-            plt.imshow(ixf, cmap = plt.get_cmap('gray'))
+            plt.imshow(ixf, cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)
+            circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
-            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky,
+                                     color='green', fill=False)
             ax.add_artist(circle)
 
         mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
-        ixfz, Kx, Ky = self._zoomf_pytorch(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
+        ixfz, Kx, Ky = self._zoomf_pytorch(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]),
+                                           np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_pytorch(abs(ixfz))
 
         if self.debug:
@@ -1407,8 +1456,10 @@ class BaseSimProcessor:
         return torch.div(indx, in_array.shape[1], rounding_mode='floor'), indx % in_array.shape[1]
 
     def _zoomf(self, in_arr, M, kx, ky, mag, kmax):
-        resy = self._pyczt(in_arr, M[0], exp(-1j * 2 * pi / (mag[0] * M[0])), exp(-1j * pi * (1 / mag[0] - 2 * ky / kmax)))
-        res = self._pyczt(resy.T, M[1], exp(-1j * 2 * pi / (mag[1] * M[1])), exp(-1j * pi * (1 / mag[1] - 2 * kx / kmax))).T
+        resy = self._pyczt(in_arr, M[0], exp(-1j * 2 * pi / (mag[0] * M[0])),
+                           exp(-1j * pi * (1 / mag[0] - 2 * ky / kmax)))
+        res = self._pyczt(resy.T, M[1], exp(-1j * 2 * pi / (mag[1] * M[1])),
+                          exp(-1j * pi * (1 / mag[1] - 2 * kx / kmax))).T
         kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * np.arange(0, M[0])
         kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * np.arange(0, M[1])
         dim = np.shape(in_arr)
@@ -1431,12 +1482,16 @@ class BaseSimProcessor:
         return res, kxarr, kyarr
 
     def _zoomf_pytorch(self, in_arr, M, kx, ky, mag, kmax):
-        resy = self._pyczt_pytorch(in_arr, M[0], torch.exp(torch.tensor(-1j * 2 * pi / (mag[0] * M[0]), device=self.tdev)),
-                                torch.exp(torch.tensor(-1j * pi * (1 / mag[0] - 2 * ky / kmax), device=self.tdev)))
-        res = self._pyczt_pytorch(resy.T, M[1], torch.exp(torch.tensor(-1j * 2 * pi / (mag[1] * M[1]), device=self.tdev)),
-                               torch.exp(torch.tensor(-1j * pi * (1 / mag[1] - 2 * kx / kmax), device=self.tdev))).T
-        kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
-        kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * torch.arange(0, M[1], device=self.tdev)
+        resy = self._pyczt_pytorch(in_arr, M[0],
+                                   torch.exp(torch.tensor(-1j * 2 * pi / (mag[0] * M[0]), device=self.tdev)),
+                                   torch.exp(torch.tensor(-1j * pi * (1 / mag[0] - 2 * ky / kmax), device=self.tdev)))
+        res = self._pyczt_pytorch(resy.T, M[1],
+                                  torch.exp(torch.tensor(-1j * 2 * pi / (mag[1] * M[1]), device=self.tdev)),
+                                  torch.exp(torch.tensor(-1j * pi * (1 / mag[1] - 2 * kx / kmax), device=self.tdev))).T
+        kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * torch.arange(0, M[0],
+                                                                                                   device=self.tdev)
+        kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * torch.arange(0, M[1],
+                                                                                                   device=self.tdev)
         dim = in_arr.shape
         # remove phase tilt from (0,0) offset in spatial domain
         res = res * torch.unsqueeze(torch.exp(1j * kyarr * dim[0] * pi / kmax), 1)
