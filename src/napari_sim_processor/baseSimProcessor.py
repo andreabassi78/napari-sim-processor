@@ -825,6 +825,7 @@ class BaseSimProcessor:
             nim = nim + self._nsteps - r
         nimg = nim // self._nsteps
         imf = fft.rfft2(img) * self._prefilter[:, 0:self.Nx // 2 + 1]
+        self.imgf = imf
         img2 = np.zeros([nim, 2 * self.Ny, 2 * self.Nx], dtype=np.single)
         for i in range(0, nim, self._nsteps):
             self._carray1[:, 0:self.Ny // 2, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, 0:self.Ny // 2,
@@ -833,6 +834,7 @@ class BaseSimProcessor:
                                                                                  self.Ny // 2:self.Ny,
                                                                                  0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = fft.irfft2(self._carray1) * self._reconfactor
+        self.img2 = img2
         img3 = np.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
 
         for offs in range(0, 2 * self.Ny - blocksize, blocksize):
