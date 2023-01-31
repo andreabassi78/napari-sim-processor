@@ -251,8 +251,7 @@ class SimAnalysis(QWidget):
                                   layout=right_layout,
                                   write_function = self.setReconstructor)    
         # buttons
-        buttons_dict = {'Select image layer': self.select_layer,
-                        'Widefield': self.calculate_WF_image,
+        buttons_dict = {'Widefield': self.calculate_WF_image,
                         'Calibrate': self.calibration,
                         'Plot calibration phases':self.find_phaseshifts,
                         'SIM reconstruction': self.single_plane_reconstruction,
