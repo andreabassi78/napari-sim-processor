@@ -1164,7 +1164,7 @@ class BaseSimProcessor:
         if self.debug:
             ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(band))))
             plt.figure()
-            plt.title('Find carrier')
+            plt.title('Refine carrier')
             plt.imshow(ixf, cmap = plt.get_cmap('gray'))
             ax = plt.gca()
             circle = plt.Circle((pxc0, pyc0), color = 'red', fill = False)

@@ -3,13 +3,13 @@ from numpy import pi
 
 from baseSimProcessor import BaseSimProcessor
 
-class HexSimProcessor(BaseSimProcessor):
+class RaSimProcessor(BaseSimProcessor):
     '''
     Implements hexagonal SIM illumination with three beams, seven phase steps
     '''
-    def __init__(self, nsteps):
+    def __init__(self,nsteps):
         self._nsteps = nsteps
-        self._nbands = 3
+        self._nbands = 2
         self.usePhases = False  # can be overridden before calibration
         super().__init__()
 
@@ -29,10 +29,13 @@ class HexSimProcessor(BaseSimProcessor):
             phase_matrix = (2 * pi / self._nsteps) * (
                         (np.arange(0, self._nsteps)[:, np.newaxis]) * np.arange(0, self._nbands + 1))
             phase_matrix = np.append(phase_matrix, -phase_matrix[:, 1:], axis=1)
+            # phase_matrix[:, 2] *= 1.5
+            # phase_matrix[:, 4] *= 1.5
         else:
             phase_matrix = np.append(np.append(np.zeros((self._nsteps, 1)), phi.T, axis = 1), -phi.T, axis=1)
         if self.debug:
             print(phase_matrix)
+        print(phase_matrix)
         M = np.complex64(np.exp(1j * phase_matrix))
         if self.debug:
             print(np.linalg.cond(M), np.linalg.cond(M, 'fro'), np.linalg.cond(M, np.inf), np.linalg.cond(M, -np.inf),

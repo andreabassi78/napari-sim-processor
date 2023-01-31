@@ -6,6 +6,7 @@ Created on Tue Jan 25 16:34:41 2022
 from widget_settings import Setting, Combo_box
 from baseSimProcessor import pytorch, cupy
 from hexSimProcessor import HexSimProcessor
+from raSimProcessor import RaSimProcessor
 from convSimProcessor import ConvSimProcessor
 import napari
 from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
@@ -24,6 +25,7 @@ from enum  import Enum
 class Sim_modes(Enum):
     SIM = 1
     HEXSIM = 2
+    RASIM = 3
 
 
 class Accel(Enum):
@@ -122,9 +124,9 @@ def reshape(viewer: napari.Viewer,
         viewer.dims.set_point(axis=[0,1,2], value=[0,0,0]) #raises ValueError in napari versions <0.4.13 
 
 
-@magic_factory    
+@magic_factory
 def choose_layer(image: Image):
-        pass #TODO: substitute with a qtwidget without magic functions 
+        pass #TODO: substitute with a qtwidget without magic functions
 
 
 class SimAnalysis(QWidget):
@@ -249,7 +251,8 @@ class SimAnalysis(QWidget):
                                   layout=right_layout,
                                   write_function = self.setReconstructor)    
         # buttons
-        buttons_dict = {'Widefield': self.calculate_WF_image,
+        buttons_dict = {'Select image layer': self.select_layer,
+                        'Widefield': self.calculate_WF_image,
                         'Calibrate': self.calibration,
                         'Plot calibration phases':self.find_phaseshifts,
                         'SIM reconstruction': self.single_plane_reconstruction,
@@ -271,7 +274,7 @@ class SimAnalysis(QWidget):
         _layout.addWidget(widget.native)
 
 
-    #@magicgui(call_button='Select image layer')    
+    #@magicgui(call_button='Select image layer')
     def select_layer(self, image: Image):
         '''
         Selects a Image layer after checking that it contains raw sim data organized
@@ -281,7 +284,7 @@ class SimAnalysis(QWidget):
         ----------
         image : napari.layers.Image
             The image layer to process, it contains the raw data 
-        ''' 
+        '''
         image = self.choose_layer_widget.image.value
         if not isinstance(image, Image):
             raise(KeyError('Please select a image stack'))
@@ -502,13 +505,16 @@ class SimAnalysis(QWidget):
                 self.start_sim_processor()
             else:
                 if self.sim_mode.current_data == Sim_modes.HEXSIM.value:  
-                    self.h = HexSimProcessor()  
+                    self.h = HexSimProcessor(self.phases_number.val)
                     k_shape = (3,1)
                 elif self.sim_mode.current_data == Sim_modes.SIM.value and self.phases_number.val >= 3 and self.angles_number.val > 0:
                     self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
                                               phaseSteps=self.phases_number.val)
-                    k_shape = (self.angles_number.val,1)   
-                else: 
+                    k_shape = (self.angles_number.val,1)
+                elif self.sim_mode.current_data == Sim_modes.RASIM.value:
+                    self.h = RaSimProcessor(self.phases_number.val)
+                    k_shape = (2, 1)
+                else:
                     raise(ValueError("Invalid phases or angles number"))
                 self.carrier_idx.set_min_max(0,k_shape[0]-1) # TODO connect carrier idx to angle if Sim_mode == SIM
                 self.h.debug = False
@@ -648,12 +654,17 @@ class SimAnalysis(QWidget):
                 kys = self.h.ky
                 pc = np.zeros((len(kxs),2))
                 radii = []
+                colors = []
                 for idx, (kx,ky) in enumerate(zip(kxs,kys)):
                     pc[idx,0] = ky[0] / dky + Ny/2
                     pc[idx,1] = kx[0] / dkx + Nx/2
                     radii.append(((Nx + Ny) // 60, (Nx + Ny) // 60)) # radius of the displayed circle
-                layer=self.add_circles(pc, radii, name, color='red')
-                self.move_layer_to_top(layer) 
+                    if idx == self.carrier_idx.val:
+                        colors.append('red')
+                    else:
+                        colors.append('yellow')
+                layer=self.add_circles(pc, radii, name, color=colors)
+                self.move_layer_to_top(layer)
                 # kr = np.sqrt(kxs**2+kys**2)
                 # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
             elif name in self.viewer.layers:
@@ -901,32 +912,39 @@ class SimAnalysis(QWidget):
         assert self.isCalibrated, 'SIM processor not calibrated, unable to show phases'
         if self.sim_mode.current_data == Sim_modes.HEXSIM.value:
             self.find_hexsim_phaseshifts()
+        if self.sim_mode.current_data == Sim_modes.RASIM.value:
+            self.find_hexsim_phaseshifts()
         elif self.sim_mode.current_data == Sim_modes.SIM.value:
             self.find_sim_phaseshifts()
         
         
-    def find_hexsim_phaseshifts(self):   
-        phaseshift = np.zeros((7,3))
-        expected_phase = np.zeros((7,3))
-        error = np.zeros((7,3))
+    def find_hexsim_phaseshifts(self):
+        nbands = self.h._nbands
+        nsteps = self.h._nsteps
+        print(nbands)
+        phaseshift = np.zeros((nsteps,nbands))
+        expected_phase = np.zeros((nsteps,nbands))
+        error = np.zeros((nsteps,nbands))
         stack = self.get_current_ap_stack()
         sa,sp,sy,sx = stack.shape
         img = stack.reshape(sa*sp, sy, sx) 
-        for i in range (3):
+        for i in range (nbands):
             if self.proc.current_data == Accel.USE_TORCH.value:
                 phase, _ = self.h.find_phase_pytorch(self.h.kx[i], self.h.ky[i], img)
             elif self.proc.current_data == Accel.USE_CUPY.value:
                 phase, _ = self.h.find_phase_cupy(self.h.kx[i], self.h.ky[i], img)
             else:
                 phase, _ = self.h.find_phase(self.h.kx[i], self.h.ky[i], img)
-            expected_phase[:,i] = np.arange(7) * 2*(i+1) * np.pi / 7
+            expected_phase[:,i] = np.arange(nsteps) * 2*(i+1) * np.pi / nsteps
             phaseshift[:,i] = np.unwrap(phase - phase[0] - expected_phase[:,i]) + expected_phase[:,i]
         error = phaseshift-expected_phase
         data_to_plot = [expected_phase, phaseshift, error]
         symbols = ['.','o','|']
         legend = ['expected', 'measured', 'error']
         self.plot_with_plt(data_to_plot, legend, symbols,
-                                xlabel = 'step', ylabel = 'phase (rad)', vmax = 6*np.pi)
+                                xlabel = 'step', ylabel = 'phase (rad)',
+                                vmax = np.amax(expected_phase),
+                                ticks_num = nsteps)
             
     
     def find_sim_phaseshifts(self):   
@@ -946,18 +964,22 @@ class SimAnalysis(QWidget):
             phase = np.unwrap(phase)
             phase = phase.reshape(sa,sp).T
             expected_phase[:,angle_idx] = np.arange(sp) * 2*np.pi / sp
-            phaseshift= phase-phase[0,:]
+            phaseshift = phase-phase[0,:]
             error = phaseshift-expected_phase      
             data_to_plot = [expected_phase[:,angle_idx], phaseshift[:,angle_idx], error[:,angle_idx]]
             symbols = ['.','o','|']
             legend = ['expected', 'measured', 'error']
             self.plot_with_plt(data_to_plot, legend, symbols, title = f'angle {angle_idx}',
-                                    xlabel = 'step', ylabel = 'phase (rad)', vmax = 2*np.pi)
+                                    xlabel = 'step', ylabel = 'phase (rad)',
+                                    vmax = np.amax(expected_phase),
+                                    ticks_num = sp)
                              
     
     def plot_with_plt(self, data_list, legend, symbols,
                       xlabel = 'step', ylabel = 'phase',
-                      vmax = 2*np.pi, title = ''):
+                      vmax = 2*np.pi,
+                      ticks_num = 3 ,
+                      title = ''):
         import matplotlib.pyplot as plt
         char_size = 10
         plt.rc('font', family='calibri', size=char_size)
@@ -983,8 +1005,7 @@ class SimAnalysis(QWidget):
         ax.yaxis.set_tick_params(labelsize=char_size*0.75)
         ax.legend(legend, loc='best', frameon = False, fontsize=char_size*0.8)
         ax.grid(True, which='major', axis='both', alpha=0.2)
-        vales_num = s[0]
-        ticks = np.linspace(0, vmax*(vales_num-1)/vales_num, 2*vales_num-1 )
+        ticks = np.linspace(0, vmax, ticks_num)
         ax.set_yticks(ticks)
         fig.tight_layout()
         plt.show(block=False)
