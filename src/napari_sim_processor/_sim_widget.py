@@ -3,11 +3,18 @@ Created on Tue Jan 25 16:34:41 2022
 
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from widget_settings import Setting, Combo_box
-from processors.baseSimProcessor import pytorch, cupy
-from processors.hexSimProcessor import HexSimProcessor
-from processors.raSimProcessor import RaSimProcessor
-from processors.convSimProcessor import ConvSimProcessor
+if __name__ == '__main__':
+    from widget_settings import Setting, Combo_box
+    from processors.baseSimProcessor import pytorch, cupy
+    from processors.hexSimProcessor import HexSimProcessor
+    from processors.raSimProcessor import RaSimProcessor
+    from processors.convSimProcessor import ConvSimProcessor
+else:
+    from .widget_settings import Setting, Combo_box
+    from .processors.baseSimProcessor import pytorch, cupy
+    from .processors.hexSimProcessor import HexSimProcessor
+    from .processors.raSimProcessor import RaSimProcessor
+    from .processors.convSimProcessor import ConvSimProcessor
 import napari
 from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
 from qtpy.QtCore import Qt
