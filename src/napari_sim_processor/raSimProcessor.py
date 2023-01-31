@@ -1,7 +1,7 @@
 import numpy as np
 from numpy import pi
 
-from .baseSimProcessor import BaseSimProcessor
+from baseSimProcessor import BaseSimProcessor
 
 class RaSimProcessor(BaseSimProcessor):
     '''
