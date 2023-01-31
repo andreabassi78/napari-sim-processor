@@ -3,10 +3,10 @@ Created on Tue Jan 25 16:34:41 2022
 
 @authors: Andrea Bassi @Polimi, Mark Neil @ImperialCollege
 """
-from napari_sim_processor.widget_settings import Setting, Combo_box
-from napari_sim_processor.baseSimProcessor import pytorch, cupy
-from napari_sim_processor.hexSimProcessor import HexSimProcessor
-from napari_sim_processor.convSimProcessor import ConvSimProcessor
+from widget_settings import Setting, Combo_box
+from baseSimProcessor import pytorch, cupy
+from hexSimProcessor import HexSimProcessor
+from convSimProcessor import ConvSimProcessor
 import napari
 from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
 from qtpy.QtCore import Qt
@@ -122,6 +122,11 @@ def reshape(viewer: napari.Viewer,
         viewer.dims.set_point(axis=[0,1,2], value=[0,0,0]) #raises ValueError in napari versions <0.4.13 
 
 
+@magic_factory    
+def choose_layer(image: Image):
+        pass #TODO: substitute with a qtwidget without magic functions 
+
+
 class SimAnalysis(QWidget):
     '''
     A Napari plugin for the reconstruction of Structured Illumination microscopy (SIM) data with GPU acceleration (with pytorch, if installed).
@@ -161,7 +166,12 @@ class SimAnalysis(QWidget):
         right_layout = QVBoxLayout()
         bottom_layout.addLayout(right_layout)
         # Fill top layout
-        self.add_magic_function(self.select_layer, top_layout)
+        self.choose_layer_widget = choose_layer()
+        self.choose_layer_widget.call_button.visible = False
+        self.add_magic_function(self.choose_layer_widget, top_layout)
+        select_button = QPushButton('Select image layer')
+        select_button.clicked.connect(self.select_layer)
+        top_layout.addWidget(select_button)
         # Fill bottom-left layout
         self.sim_mode = Combo_box(name = 'Mode', choices = Sim_modes, layout=left_layout,
                                   write_function = self.reset_processor)
@@ -255,25 +265,26 @@ class SimAnalysis(QWidget):
         self.messageBox.setText('Messages')
     
         
-    def add_magic_function(self, function, _layout):
-        self.viewer.layers.events.inserted.connect(function.reset_choices)
-        self.viewer.layers.events.removed.connect(function.reset_choices)
-        _layout.addWidget(function.native)
-        
-    
-    @magicgui(call_button='Select image layer')    
+    def add_magic_function(self, widget, _layout):
+        self.viewer.layers.events.inserted.connect(widget.reset_choices)
+        self.viewer.layers.events.removed.connect(widget.reset_choices)
+        _layout.addWidget(widget.native)
+
+
+    #@magicgui(call_button='Select image layer')    
     def select_layer(self, image: Image):
         '''
-        Selects a Image layer after chaking that it contains raw sim data organized
+        Selects a Image layer after checking that it contains raw sim data organized
         as a 5D stack (angle,phase,z,y,x).
         Stores the name of the image in self.imageRaw_name, which is used frequently in the other methods.
         Parameters
         ----------
         image : napari.layers.Image
             The image layer to process, it contains the raw data 
-        '''      
+        ''' 
+        image = self.choose_layer_widget.image.value
         if not isinstance(image, Image):
-            return
+            raise(KeyError('Please select a image stack'))
         if hasattr(self,'imageRaw_name'):
             delattr(self,'imageRaw_name')
         data = image.data
@@ -339,7 +350,7 @@ class SimAnalysis(QWidget):
             if self.step_changed(0,2,3,4):
                 self.setReconstructor()
             delta_t = time.time() - t0
-            self.on_step_change.set_timeout(delta_t)
+            self.on_step_change.set_timeout(int(delta_t)+1)
 
 
     def step_changed(self, *step_indexes):
@@ -379,7 +390,8 @@ class SimAnalysis(QWidget):
                                             name = im_name,
                                             scale = scale,
                                             colormap = colormap,
-                                            interpolation = 'bilinear')
+                                            )
+            layer.interpolation2d = 'spline36'
         self.center_stack(image_values)
         # self.move_layer_to_top(layer)
         if kwargs.get('autoscale') is True:

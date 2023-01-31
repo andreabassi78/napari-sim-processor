@@ -1067,8 +1067,8 @@ class BaseSimProcessor:
             else:
                 plt.imshow(xp.sqrt(xp.abs(FFT.fftshift(FFT.fft2(p[0, :, :] * p0)))), cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            pxc0 = np.int(np.round(kx / self._dkx) + self.N / 2)
-            pyc0 = np.int(np.round(ky / self._dky) + self.N / 2)
+            pxc0 = np.int32(np.round(kx / self._dkx) + self.N / 2)
+            pyc0 = np.int32(np.round(ky / self._dky) + self.N / 2)
             circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
             mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
@@ -1137,8 +1137,8 @@ class BaseSimProcessor:
         return kx, ky
 
     def _refineCarrier(self, band0, band1, kx_in, ky_in):
-        pxc0 = np.int(np.round(kx_in / self._dkx) + self.Nx // 2)
-        pyc0 = np.int(np.round(ky_in / self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in / self._dkx) + self.Nx // 2)
+        pyc0 = np.int32(np.round(ky_in / self._dky) + self.Ny // 2)
 
         otf_exclude_min_radius = self.eta / 2
         otf_exclude_max_radius = self.eta * 2
@@ -1234,8 +1234,8 @@ class BaseSimProcessor:
         band0 = cp.asarray(band0)
         band1 = cp.asarray(band1)
 
-        pxc0 = np.int(np.round(kx_in/self._dkx) + self.Nx // 2)
-        pyc0 = np.int(np.round(ky_in/self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in/self._dkx) + self.Nx // 2)
+        pyc0 = np.int32(np.round(ky_in/self._dky) + self.Ny // 2)
 
         otf_exclude_min_radius = self.eta/2
         otf_exclude_max_radius = 1.5
@@ -1323,8 +1323,8 @@ class BaseSimProcessor:
         band0 = torch.as_tensor(band0, device=self.tdev)
         band1 = torch.as_tensor(band1, device=self.tdev)
 
-        pxc0 = np.int(np.round(kx_in/self._dkx) + self.Nx // 2)
-        pyc0 = np.int(np.round(ky_in/self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in/self._dkx) + self.Nx // 2)
+        pyc0 = np.int32(np.round(ky_in/self._dky) + self.Ny // 2)
 
         otf_exclude_min_radius = self.eta / 2
         otf_exclude_max_radius = self.eta * 2
