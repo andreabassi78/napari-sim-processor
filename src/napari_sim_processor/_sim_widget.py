@@ -15,7 +15,7 @@ from napari.layers import Image
 import numpy as np
 from napari.qt.threading import thread_worker
 from magicgui.widgets import FunctionGui
-from magicgui import magicgui, magic_factory
+from magicgui import magic_factory
 import warnings
 import time
 from superqt.utils import qthrottled
@@ -265,7 +265,7 @@ class SimAnalysis(QWidget):
         self.messageBox = QLineEdit()
         layout.addWidget(self.messageBox, stretch=True)
         self.messageBox.setText('Messages')
-    
+        
         
     def add_magic_function(self, widget, _layout):
         self.viewer.layers.events.inserted.connect(widget.reset_choices)
@@ -273,7 +273,6 @@ class SimAnalysis(QWidget):
         _layout.addWidget(widget.native)
 
 
-    #@magicgui(call_button='Select image layer')
     def select_layer(self, image: Image):
         '''
         Selects a Image layer after checking that it contains raw sim data organized
