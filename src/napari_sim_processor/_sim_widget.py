@@ -392,7 +392,7 @@ class SimAnalysis(QWidget):
                                             scale = scale,
                                             colormap = colormap,
                                             )
-            layer.interpolation2d = 'spline36'
+        layer.interpolation2d = 'spline36'
         self.center_stack(image_values)
         # self.move_layer_to_top(layer)
         if kwargs.get('autoscale') is True:
