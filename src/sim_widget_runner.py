@@ -1,6 +1,6 @@
 from napari_sim_processor._sim_widget import reshape, SimAnalysis
 '''
-Script that runs the napari plugin from the IDE. 
+Script that runs the napari widget from the IDE. 
 It is not executed when the plugin runs.
 '''
 
