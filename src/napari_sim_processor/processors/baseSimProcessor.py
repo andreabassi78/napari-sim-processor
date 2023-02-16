@@ -67,6 +67,7 @@ class BaseSimProcessor:
     usePhases = False   # Whether to measure and use individual phases in calibration/reconstruction
     _lastN = (0, 0)      # To track changes in array size that will force array re-allocation
     _M = None       # Mand reconstruction matrix
+    phi = None      # Measured phases
 
     def __init__(self):
         # self._nsteps = 0
@@ -212,13 +213,13 @@ class BaseSimProcessor:
         # Measure and correct for carrier phases
 
         if self.usePhases:
-            phi = np.zeros((self._nbands, self._nsteps), dtype=np.single)
+            self.phi = np.zeros((self._nbands, self._nsteps), dtype=np.single)
             for i in range(self._nbands):
-                phi[i, :], _ = self.find_phase(self.kx[i], self.ky[i], img, useCupy=useCupy, useTorch=useTorch)
+                self.phi[i, :], _ = self.find_phase(self.kx[i], self.ky[i], img, useCupy=useCupy, useTorch=useTorch)
             if self.debug:
-                print(phi)
-                print(phi.shape)
-            self._M = np.linalg.pinv(self._get_band_construction_matrix(phi))
+                print(self.phi)
+                print(self.phi.shape)
+            self._M = np.linalg.pinv(self._get_band_construction_matrix(self.phi))
 
             sum_prepared_comp.fill(0)
             if useTorch:
@@ -253,6 +254,8 @@ class BaseSimProcessor:
                 print(f'ky = {cky}')
                 print(f'p  = {p}')
                 print(f'a  = {ampl}')
+        else:
+            self.phi = None
 
         ph = np.single(2 * pi * self.NA / self.wavelength)
 
@@ -402,7 +405,7 @@ class BaseSimProcessor:
         kx = np.arange(-Nx / 2, Nx / 2, dtype=np.double) * dkx
         ky = np.arange(-Ny / 2, Ny / 2, dtype=np.double) * dky
         kr = np.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2, dtype=np.single)
-        M = np.linalg.pinv(self._get_band_construction_matrix())
+        M = np.linalg.pinv(self._get_band_construction_matrix(self.phi))
 
         if len(img) > self._nsteps:
             imgs = np.zeros((self._nsteps, Ny, Nx), dtype=np.single)
@@ -439,7 +442,7 @@ class BaseSimProcessor:
         kx = cp.arange(-Nx / 2, Nx / 2, dtype=cp.double) * dkx
         ky = cp.arange(-Ny / 2, Ny / 2, dtype=cp.double) * dky
         kr = cp.sqrt(kx ** 2 + ky[:, cp.newaxis] ** 2, dtype=cp.single)
-        M = cp.linalg.pinv(cp.asarray(self._get_band_construction_matrix()))
+        M = cp.linalg.pinv(cp.asarray(self._get_band_construction_matrix(self.phi)))
 
         if len(img) > self._nsteps:
             imgs = cp.zeros((self._nsteps, Ny, Nx), dtype=np.single)
@@ -478,7 +481,7 @@ class BaseSimProcessor:
         kx = torch.arange(-Nx / 2, Nx / 2, dtype=torch.float32, device=self.tdev) * dkx
         ky = torch.arange(-Ny / 2, Ny / 2, dtype=torch.float32, device=self.tdev) * dky
         kr = torch.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2)
-        M = torch.linalg.pinv(torch.as_tensor(self._get_band_construction_matrix(), dtype=torch.complex64, device=self.tdev))
+        M = torch.linalg.pinv(torch.as_tensor(self._get_band_construction_matrix(self.phi), dtype=torch.complex64, device=self.tdev))
 
         if len(img) > self._nsteps:
             imgs = torch.zeros((self._nsteps, Ny, Nx), dtype=torch.float32, device=self.tdev)
@@ -1067,8 +1070,8 @@ class BaseSimProcessor:
             else:
                 plt.imshow(xp.sqrt(xp.abs(FFT.fftshift(FFT.fft2(p[0, :, :] * p0)))), cmap=plt.get_cmap('gray'))
             ax = plt.gca()
-            pxc0 = np.int32(np.round(kx / self._dkx) + self.N / 2)
-            pyc0 = np.int32(np.round(ky / self._dky) + self.N / 2)
+            pxc0 = np.int32(np.round(kx / self._dkx) + self.Nx / 2)
+            pyc0 = np.int32(np.round(ky / self._dky) + self.Ny / 2)
             circle = plt.Circle((pxc0, pyc0), color='red', fill=False)
             ax.add_artist(circle)
             mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
