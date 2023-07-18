@@ -454,15 +454,17 @@ class BaseSimProcessor:
         else:
             imgs = cp.asarray(img, dtype=cp.single)
         sum_prepared_comp = cp.dot(M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
+        ix = cp.zeros_like(sum_prepared_comp[1:, :, :], dtype=np.complex64)
+        for i in range(self._nbands):
+            otf_exclude_min_radius = self.eta * self.etafac[i] / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+            otf_exclude_max_radius = self.eta * self.etafac[i] * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+            maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
-        motf = fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
+            motf = fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
 
-        band0_common = cp.fft.ifft2(cp.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
-        band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[1:, :, :])) * motf)
-        ix = band0_common * band1_common
+            band0_common = cp.fft.ifft2(cp.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
+            band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[i + 1, :, :])) * motf)
+            ix[i, :, :] = band0_common * band1_common
 
         ixf = cp.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ix)))).get()
         return ixf
@@ -492,15 +494,17 @@ class BaseSimProcessor:
         else:
             imgs = torch.as_tensor(np.float32(img), device=self.tdev)
         sum_prepared_comp = torch.einsum('ij,jkl->ikl',M[:self._nbands + 1, :], imgs + 0 * 1j)
-        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
+        ix = torch.zeros_like(sum_prepared_comp[1:, :, :], dtype=torch.complex64)
+        for i in range(self._nbands):
+            otf_exclude_min_radius = self.eta * self.etafac[i] / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+            otf_exclude_max_radius = self.eta * self.etafac[i] * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+            maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
-        motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
+            motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
 
-        band0_common = torch.fft.ifft2(torch.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
-        band1_common = torch.fft.ifft2(torch.fft.fft2(torch.conj(sum_prepared_comp[1:, :, :])) * motf)
-        ix = band0_common * band1_common
+            band0_common = torch.fft.ifft2(torch.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
+            band1_common = torch.fft.ifft2(torch.fft.fft2(torch.conj(sum_prepared_comp[i + 1, :, :])) * motf)
+            ix[i, :, :] = band0_common * band1_common
 
         ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(ix)))).cpu().numpy()
         return ixf
@@ -1146,7 +1150,7 @@ class BaseSimProcessor:
         pxc0 = np.int32(np.round(kx_in / self._dkx) + self.Nx // 2)
         pyc0 = np.int32(np.round(ky_in / self._dky) + self.Ny // 2)
 
-        otf_exclude_min_radius = 0.3  # eta / 2
+        otf_exclude_min_radius = eta / 2
         otf_exclude_max_radius = eta * 2
 
         m = (self._kr < 2)
@@ -1240,11 +1244,11 @@ class BaseSimProcessor:
         band0 = cp.asarray(band0)
         band1 = cp.asarray(band1)
 
-        pxc0 = np.int32(np.round(kx_in/self._dkx) + self.Nx // 2)
-        pyc0 = np.int32(np.round(ky_in/self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in / self._dkx) + self.Nx // 2)
+        pyc0 = np.int32(np.round(ky_in / self._dky) + self.Ny // 2)
 
-        otf_exclude_min_radius = eta/2
-        otf_exclude_max_radius = 1.5
+        otf_exclude_min_radius = eta / 2
+        otf_exclude_max_radius = eta * 2
 
         # kr = cp.sqrt(cp.asarray(self._kx) ** 2 + cp.asarray(self._ky) ** 2)
         kr = cp.asarray(self._kr, dtype=np.double)
@@ -1329,8 +1333,8 @@ class BaseSimProcessor:
         band0 = torch.as_tensor(band0, device=self.tdev)
         band1 = torch.as_tensor(band1, device=self.tdev)
 
-        pxc0 = np.int32(np.round(kx_in/self._dkx) + self.Nx // 2)
-        pyc0 = np.int32(np.round(ky_in/self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in / self._dkx) + self.Nx // 2)
+        pyc0 = np.int32(np.round(ky_in / self._dky) + self.Ny // 2)
 
         otf_exclude_min_radius = eta / 2
         otf_exclude_max_radius = eta * 2
@@ -1341,9 +1345,9 @@ class BaseSimProcessor:
         otf = torch.fft.fftshift(self._tfm_pytorch(kr, m) + (~m)*0.0001)
 
         otf_mask = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
-        shiftx = pxc0 - (self.Nx // 2)
-        shifty = pyc0 - (self.Ny // 2)
-        otf_mask_shifted = torch.roll(otf_mask, shifts=(int(shifty), int(shiftx)), dims=(0, 1))
+        shiftx = int(pxc0 - (self.Nx // 2))
+        shifty = int(pyc0 - (self.Ny // 2))
+        otf_mask_shifted = torch.roll(otf_mask, shifts=(shifty, shiftx), dims=(0, 1))
         if shiftx < 0:
             otf_mask_shifted[:, shiftx:] = False
         else:
@@ -1376,7 +1380,7 @@ class BaseSimProcessor:
             ax.add_artist(circle)
 
         mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
-        ixfz, Kx, Ky = self._zoomf_pytorch(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
+        ixfz, Kx, Ky = self._zoomf_pytorch(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]).item(), np.single(self._ky[pyc0]).item(), mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_pytorch(abs(ixfz))
 
         if self.debug:
@@ -1441,7 +1445,10 @@ class BaseSimProcessor:
                                 torch.exp(torch.tensor(-1j * pi * (1 / mag[0] - 2 * ky / kmax), device=self.tdev)))
         res = self._pyczt_pytorch(resy.T, M[1], torch.exp(torch.tensor(-1j * 2 * pi / (mag[1] * M[1]), device=self.tdev)),
                                torch.exp(torch.tensor(-1j * pi * (1 / mag[1] - 2 * kx / kmax), device=self.tdev))).T
-        kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
+        a = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2
+        b = (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
+        kyarr = a + b
+        # kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
         kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * torch.arange(0, M[1], device=self.tdev)
         dim = in_arr.shape
         # remove phase tilt from (0,0) offset in spatial domain
