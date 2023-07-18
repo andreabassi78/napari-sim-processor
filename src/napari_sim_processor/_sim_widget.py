@@ -7,7 +7,7 @@ from .widget_settings import Setting, Combo_box
 from .processors.baseSimProcessor import pytorch, cupy
 from .processors.hexSimProcessor import HexSimProcessor
 from .processors.raSimProcessor import RaSimProcessor
-from .processors.convSimProcessor import ConvSimProcessor
+from .processors.convSimProcessor import ConvSimProcessor, ConvSimProcessor3D
 import napari
 from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
 from qtpy.QtCore import Qt
@@ -26,6 +26,7 @@ class Sim_modes(Enum):
     SIM = 1
     HEXSIM = 2
     RASIM = 3
+    SIM3D = 4
 
 
 class Accel(Enum):
@@ -102,15 +103,15 @@ def reshape(viewer: napari.Viewer,
     '''
     data = input_image.data
     if angles*phases*z*y*x != data.size:
-        raise(ValueError('Input image cannot be reshaped to the given values'))
+        raise(ValueError(f'Input image {data.size} cannot be reshaped to the given values {angles*phases*z*y*x}'))
     else:
         if input_order == 'apzyx':
             rdata = data.reshape(angles, phases, z, y, x)
         elif input_order == 'pazyx':
             #rdata = np.swapaxes(data.reshape(phases, angles, z, y, x),0,1)
-            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x),[0,1],[1,0])
+            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x), [0, 1], [1, 0])
         elif input_order == 'pzayx':
-            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x),[0,1,2],[1,2,0])
+            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x), [0, 1, 2], [1, 2, 0])
         elif input_order == 'azpyx':
             rdata = np.moveaxis(data.reshape(angles, z, phases, y, x), [1, 2], [2, 1])
         elif input_order == 'zapyx':
@@ -508,7 +509,11 @@ class SimAnalysis(QWidget):
                 elif self.sim_mode.current_data == Sim_modes.SIM.value and self.phases_number.val >= 3 and self.angles_number.val > 0:
                     self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
                                               phaseSteps=self.phases_number.val)
-                    k_shape = (self.angles_number.val,1)
+                    k_shape = (self.angles_number.val, 1)
+                elif self.sim_mode.current_data == Sim_modes.SIM3D.value and self.phases_number.val >= 5 and self.angles_number.val > 0:
+                    self.h = ConvSimProcessor3D(angleSteps=self.angles_number.val,
+                                              phaseSteps=self.phases_number.val)
+                    k_shape = (self.angles_number.val * 2, 1)
                 elif self.sim_mode.current_data == Sim_modes.RASIM.value:
                     self.h = RaSimProcessor(self.phases_number.val)
                     k_shape = (2, 1)
@@ -616,8 +621,8 @@ class SimAnalysis(QWidget):
         self.show_wiener()
         self.show_spectrum()
         self.show_xcorr()
-        self.show_carrier()
         self.show_eta()
+        self.show_carrier()
 
     
     def calculate_kr(self,N):  
@@ -679,13 +684,14 @@ class SimAnalysis(QWidget):
             centres = []
             radii = []
             colors = []
+            band_idx = self.carrier_idx.val
             if self.showEta.val:
                 Nx = self.h.Nx
                 Ny = self.h.Ny
                 cutoffx, dkx   = self.calculate_kr(Nx)
                 cutoffy, dky   = self.calculate_kr(Ny)
-                eta_radiusx = 1.9 * self.h.eta * cutoffx
-                eta_radiusy = 1.9 * self.h.eta * cutoffy
+                eta_radiusx = 1.9 * self.h.eta * self.h.etafac[band_idx] * cutoffx
+                eta_radiusy = 1.9 * self.h.eta * self.h.etafac[band_idx] * cutoffy
                 centres.append(np.array([Ny/2,Nx/2]))
                 radii.append((eta_radiusy, eta_radiusx))
                 colors.append('green')
@@ -732,6 +738,7 @@ class SimAnalysis(QWidget):
                 circles_layer.add_ellipses(ellipses, edge_color=color)
             else:
                 circles_layer.data = ellipses
+                circles_layer.edge_color = color
         else:  
             circles_layer = self.viewer.add_shapes(name=shape_name,
                                    edge_width = 1.3,
@@ -914,8 +921,9 @@ class SimAnalysis(QWidget):
             self.find_hexsim_phaseshifts()
         elif self.sim_mode.current_data == Sim_modes.SIM.value:
             self.find_sim_phaseshifts()
-        
-        
+        # elif self.sim_mode.current_data == Sim_modes.SIM3D.value:
+        #     self.find_sim3D_phaseshifts()
+
     def find_hexsim_phaseshifts(self):
         nbands = self.h._nbands
         nsteps = self.h._nsteps
@@ -936,7 +944,8 @@ class SimAnalysis(QWidget):
             expected_phase[:,i] = np.arange(nsteps) * 2*(i+1) * np.pi / nsteps
             phaseshift[:,i] = np.unwrap(phase - phase[0] - expected_phase[:,i]) + expected_phase[:,i]
         error = phaseshift-expected_phase
-        data_to_plot = [expected_phase, phaseshift, error]
+        mean_err = np.mean(error, 0)
+        data_to_plot = [expected_phase, phaseshift - mean_err, error - mean_err]
         symbols = ['.','o','|']
         legend = ['expected', 'measured', 'error']
         self.plot_with_plt(data_to_plot, legend, symbols,

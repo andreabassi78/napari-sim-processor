@@ -10,6 +10,7 @@ class RaSimProcessor(BaseSimProcessor):
     def __init__(self,nsteps):
         self._nsteps = nsteps
         self._nbands = 2
+        self.etafac = np.ones(self._nbands)
         self.usePhases = False  # can be overridden before calibration
         super().__init__()
 
