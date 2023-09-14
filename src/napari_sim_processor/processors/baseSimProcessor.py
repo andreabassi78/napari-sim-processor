@@ -143,14 +143,12 @@ class BaseSimProcessor:
         kybig = kybig[:,np.newaxis]
 
         '''Sum input images if there are more than self._nsteps'''
-        Nz = len(img) // self._nsteps
         if len(img) > self._nsteps:
-            imgsum = np.zeros((self._nsteps, self.Ny, self.Nx), dtype=np.single)
+            imgs = np.zeros((self._nsteps, self.Ny, self.Nx), dtype=np.single)
             for i in range(self._nsteps):
-                imgsum[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0, dtype = np.single)
+                imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0, dtype = np.single)
         else:
-            imgsum = np.single(img)
-        imgs = np.single(img).reshape(Nz, self._nsteps, self.Nx, self.Ny)
+            imgs = np.single(img)
 
         '''Separate bands into DC and high frequency bands'''
         self._M = np.linalg.pinv(self._get_band_construction_matrix())
@@ -159,12 +157,12 @@ class BaseSimProcessor:
 
         if useTorch:
             sum_prepared_comp = torch.einsum('ij,jkl->ikl', torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
-                                          torch.as_tensor(imgsum, dtype=torch.complex64, device=self.tdev)).cpu().numpy()
+                                          torch.as_tensor(imgs, dtype=torch.complex64, device=self.tdev)).cpu().numpy()
         elif useCupy:
             sum_prepared_comp = cp.dot(cp.asarray(self._M[:self._nbands + 1, :]),
-                                           cp.asarray(imgsum).transpose((1, 0, 2))).get()
+                                           cp.asarray(imgs).transpose((1, 0, 2))).get()
         else:
-            prepared_comp = np.einsum('ik, jklm -> ijlm', self._M[:self._nbands + 1, :], imgs)
+            sum_prepared_comp = np.dot(self._M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
 
         # find parameters
         ckx = np.zeros((self._nbands, 1), dtype=np.single)
@@ -174,32 +172,30 @@ class BaseSimProcessor:
 
         if findCarrier:
             # minimum search radius in k-space
+            mask1 = (self._kr > 1.9 * self.eta)
             for i in range(self._nbands):
-                mask1 = (self._kr > 1.9 * self.eta * self.etafac[i])
                 if useTorch:
                     self.kx[i], self.ky[i] = self._coarseFindCarrier_pytorch(sum_prepared_comp[0, :, :],
-                                                            sum_prepared_comp[i + 1, :, :], mask1, self.eta * self.etafac[i])
+                                                            sum_prepared_comp[i + 1, :, :], mask1)
                 elif useCupy:
                     self.kx[i], self.ky[i] = self._coarseFindCarrier_cupy(sum_prepared_comp[0, :, :],
-                                                            sum_prepared_comp[i + 1, :, :], mask1, self.eta * self.etafac[i])
+                                                            sum_prepared_comp[i + 1, :, :], mask1)
                 else:
-                    self.kx[i], self.ky[i] = self._coarseFindCarrier(prepared_comp[0],
-                                                            prepared_comp[i + 1], mask1, self.eta * self.etafac[i])
+                    self.kx[i], self.ky[i] = self._coarseFindCarrier(sum_prepared_comp[0, :, :],
+                                                            sum_prepared_comp[i + 1, :, :], mask1)
         for i in range(self._nbands):
             if useTorch:
                 ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier_pytorch(sum_prepared_comp[0, :, :],
                                                                     sum_prepared_comp[i + 1, :, :], self.kx[i],
-                                                                    self.ky[i], self.eta * self.etafac[i])
+                                                                    self.ky[i])
             elif useCupy:
                 ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier_cupy(sum_prepared_comp[0, :, :],
                                                                     sum_prepared_comp[i + 1, :, :], self.kx[i],
-                                                                    self.ky[i], self.eta * self.etafac[i])
+                                                                    self.ky[i])
             else:
-                ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier(prepared_comp[0],
-                                                                    prepared_comp[i + 1], self.kx[i],
-                                                                    self.ky[i], self.eta * self.etafac[i])
-        # if self.etafac[i] < 1.0:
-        #     ampl[i,0] = 1.333
+                ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier(sum_prepared_comp[0, :, :],
+                                                                    sum_prepared_comp[i + 1, :, :], self.kx[i],
+                                                                    self.ky[i])
 
         self.kx = ckx # store found kx, ky, p and ampl values
         self.ky = cky
@@ -223,30 +219,30 @@ class BaseSimProcessor:
                 print(self.phi.shape)
             self._M = np.linalg.pinv(self._get_band_construction_matrix(self.phi))
 
-            # sum_prepared_comp.fill(0)
+            sum_prepared_comp.fill(0)
             if useTorch:
                 sum_prepared_comp = torch.einsum('ij,jkl->ikl',
                                                  torch.as_tensor(self._M[:self._nbands + 1, :], device=self.tdev),
-                                                 torch.as_tensor(imgsum, dtype=torch.complex64, device=self.tdev) + 0 * 1j).cpu().numpy()
+                                                 torch.as_tensor(imgs, dtype=torch.complex64, device=self.tdev) + 0 * 1j).cpu().numpy()
             elif useCupy:
-                sum_prepared_comp = cp.dot(cp.asarray(self._M[:self._nbands+1, :]), cp.asarray(imgsum).transpose((1, 0, 2))).get()
+                sum_prepared_comp = cp.dot(cp.asarray(self._M[:self._nbands+1, :]), cp.asarray(imgs).transpose((1, 0, 2))).get()
             else:
-                prepared_comp = np.einsum('ik, jklm -> ijlm', self._M[:self._nbands + 1, :], imgs)
+                sum_prepared_comp = np.dot(self._M[:self._nbands+1, :], imgs.transpose((1, 0, 2)))
 
             for i in range(self._nbands):
                 if useTorch:
                     ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier_pytorch(sum_prepared_comp[0, :, :],
                                                                                 sum_prepared_comp[i + 1, :, :],
-                                                                                self.kx[i], self.ky[i],
-                                                                                self.eta * self.etafac[i])
+                                                                                self.kx[i],
+                                                                                self.ky[i])
                 elif useCupy:
                     ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier_cupy(sum_prepared_comp[0, :, :],
                                                                              sum_prepared_comp[i + 1, :, :], self.kx[i],
-                                                                             self.ky[i], self.eta * self.etafac[i])
+                                                                             self.ky[i])
                 else:
-                    ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier(prepared_comp[0],
-                                                                        prepared_comp[i + 1], self.kx[i],
-                                                                        self.ky[i], self.eta * self.etafac[i])
+                    ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier(sum_prepared_comp[0, :, :],
+                                                                        sum_prepared_comp[i + 1, :, :], self.kx[i],
+                                                                        self.ky[i])
             self.kx = ckx  # store found kx, ky, p and ampl values
             self.ky = cky
             self.p = p
@@ -396,10 +392,7 @@ class BaseSimProcessor:
             self._postfilter_torch = torch.as_tensor(self._postfilter, device=self.tdev)
 
     def crossCorrelations(self, img):
-        '''
-        Calculate cross-correlations to reveal carrier
-        Sum cross correlations from input images if there are more than self._nsteps
-        '''
+        '''Calculate cross-correlations to reveal carrier, sum input images if there are more than self._nsteps'''
         Ny, Nx = img[0, :, :].shape
 
         # Recalculate arrays by default to account for changes to parameters
@@ -413,23 +406,24 @@ class BaseSimProcessor:
         kr = np.sqrt(kx ** 2 + ky[:, np.newaxis] ** 2, dtype=np.single)
         M = np.linalg.pinv(self._get_band_construction_matrix(self.phi))
 
-        Nz = len(img) // self._nsteps
-        imgs = img[:Nz * self._nsteps].astype(np.single).reshape((Nz, self._nsteps, self.Nx, self.Ny))
-        prepared_comp = np.einsum('ik, jklm -> ijlm', self._M[:self._nbands + 1, :], imgs)
+        if len(img) > self._nsteps:
+            imgs = np.zeros((self._nsteps, Ny, Nx), dtype=np.single)
+            for i in range(self._nsteps):
+                imgs[i, :, :] = np.sum(img[i:(len(img) // self._nsteps) * self._nsteps:self._nsteps, :, :], 0,
+                                       dtype=np.single)
+        else:
+            imgs = np.single(img)
+        sum_prepared_comp = np.dot(M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
-        ix = np.zeros((self._nbands, Nx, Ny), dtype=np.complex64)
-        for i in range(self._nbands):
-            otf_exclude_min_radius = self.eta * self.etafac[i] / 2
-            # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-            otf_exclude_max_radius = self.eta * self.etafac[i] * 2
-            # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-            maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
+        motf = fft.fftshift(maskbpf / (self._tfm(kr, maskbpf) + (1 - maskbpf) * 0.0001))
 
-            motf = fft.fftshift(maskbpf / (self._tfm(kr, maskbpf) + (1 - maskbpf) * 0.0001))
+        band0_common = fft.ifft2(fft.fft2(sum_prepared_comp[0, :, :]) * motf)
+        band1_common = fft.ifft2(fft.fft2(np.conjugate(sum_prepared_comp[1:, :, :])) * motf)
+        ix = band0_common * band1_common
 
-            band0_common = fft.ifft2(fft.fft2(prepared_comp[0, :, :, :]) * motf)
-            band1_common = fft.ifft2(fft.fft2(np.conjugate(prepared_comp[i + 1, :, :, :])) * motf)
-            ix[i, :, :] = np.sum(band0_common * band1_common, axis=0)
         ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(ix))))
         return ixf
 
@@ -458,17 +452,15 @@ class BaseSimProcessor:
         else:
             imgs = cp.asarray(img, dtype=cp.single)
         sum_prepared_comp = cp.dot(M[:self._nbands + 1, :], imgs.transpose((1, 0, 2)))
-        ix = cp.zeros_like(sum_prepared_comp[1:, :, :], dtype=np.complex64)
-        for i in range(self._nbands):
-            otf_exclude_min_radius = self.eta * self.etafac[i] / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-            otf_exclude_max_radius = self.eta * self.etafac[i] * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-            maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
-            motf = fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
+        motf = fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
 
-            band0_common = cp.fft.ifft2(cp.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
-            band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[i + 1, :, :])) * motf)
-            ix[i, :, :] = band0_common * band1_common
+        band0_common = cp.fft.ifft2(cp.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
+        band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[1:, :, :])) * motf)
+        ix = band0_common * band1_common
 
         ixf = cp.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ix)))).get()
         return ixf
@@ -498,17 +490,15 @@ class BaseSimProcessor:
         else:
             imgs = torch.as_tensor(np.float32(img), device=self.tdev)
         sum_prepared_comp = torch.einsum('ij,jkl->ikl',M[:self._nbands + 1, :], imgs + 0 * 1j)
-        ix = torch.zeros_like(sum_prepared_comp[1:, :, :], dtype=torch.complex64)
-        for i in range(self._nbands):
-            otf_exclude_min_radius = self.eta * self.etafac[i] / 2  # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-            otf_exclude_max_radius = self.eta * self.etafac[i] * 2  # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-            maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
-            motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
+        motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
 
-            band0_common = torch.fft.ifft2(torch.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
-            band1_common = torch.fft.ifft2(torch.fft.fft2(torch.conj(sum_prepared_comp[i + 1, :, :])) * motf)
-            ix[i, :, :] = band0_common * band1_common
+        band0_common = torch.fft.ifft2(torch.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
+        band1_common = torch.fft.ifft2(torch.fft.fft2(torch.conj(sum_prepared_comp[1:, :, :])) * motf)
+        ix = band0_common * band1_common
 
         ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(ix)))).cpu().numpy()
         return ixf
@@ -1051,14 +1041,9 @@ class BaseSimProcessor:
             yy = np.arange(-self.Ny / 2 * self._dy, self.Ny / 2 * self._dy, self._dy, dtype=np.double)
             (TF, FFT, xp) = (self._tf, np.fft, np)
 
-        k = np.sqrt(kx * kx + ky * ky)
-        hpf = 1.0 * (kr > 0.2 * k)
-        m = kr < 0.8 * k
+        hpf = 1.0 * (kr > self.eta / 2)
+        m = kr < self.eta * 2
         otf[m] = TF(kr[m])
-
-        # hpf = 1.0 * (kr > self.eta / 2)
-        # m = kr < self.eta * 2
-        # otf[m] = TF(kr[m])
 
         hpf[m] = hpf[m] / otf[m]
         hpf[~m] = 0
@@ -1122,9 +1107,9 @@ class BaseSimProcessor:
         else:
             return phase, ampl
 
-    def _coarseFindCarrier(self, band0, band1, mask, eta):
-        otf_exclude_min_radius = eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+    def _coarseFindCarrier(self, band0, band1, mask):
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (self._kr > otf_exclude_min_radius) & (self._kr < otf_exclude_max_radius)
 
         motf = fft.fftshift(maskbpf / (self._tfm(self._kr, maskbpf) + (1 - maskbpf) * 0.0001))
@@ -1132,11 +1117,7 @@ class BaseSimProcessor:
         band0_common = fft.ifft2(fft.fft2(band0) * motf)
         band1_common = fft.ifft2(fft.fft2(np.conjugate(band1)) * motf)
         # ix = band0_common * np.conjugate(band1_common)
-
-        if band0_common.ndim == 2:
-            ix = band0_common * band1_common
-        else:
-            ix = np.sum(band0_common * band1_common, axis=0)
+        ix = band0_common * band1_common
 
         ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(ix))))
 
@@ -1154,17 +1135,17 @@ class BaseSimProcessor:
             ax.add_artist(circle)
             circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=4 / self._dkx, height=4 / self._dky, color='green', fill=False)
             ax.add_artist(circle)
-            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=3.8 * eta / self._dkx, height=3.8 * eta / self._dky, color='cyan', fill=False)
+            circle = patches.Ellipse((self.Nx // 2, self.Ny // 2), width=3.8 * self.eta / self._dkx, height=3.8 * self.eta / self._dky, color='cyan', fill=False)
             ax.add_artist(circle)
 
         return kx, ky
 
-    def _refineCarrier(self, band0, band1, kx_in, ky_in, eta):
+    def _refineCarrier(self, band0, band1, kx_in, ky_in):
         pxc0 = np.int32(np.round(kx_in / self._dkx) + self.Nx // 2)
         pyc0 = np.int32(np.round(ky_in / self._dky) + self.Ny // 2)
 
-        otf_exclude_min_radius = eta / 2
-        otf_exclude_max_radius = eta * 2
+        otf_exclude_min_radius = self.eta / 2
+        otf_exclude_max_radius = self.eta * 2
 
         m = (self._kr < 2)
         otf = fft.fftshift(self._tfm(self._kr, m) + (1 - m) * 0.0001)
@@ -1182,10 +1163,7 @@ class BaseSimProcessor:
 
         band1_common = fft.ifft2(fft.fft2(np.conjugate(band1)) / otf * otf_mask_for_band_common_freq)
 
-        if band0_common.ndim == 2:
-            band = band0_common * band1_common
-        else:
-            band = np.sum(band0_common * band1_common, axis=0)
+        band = band0_common * band1_common
 
         if self.debug:
             ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(band))))
@@ -1226,14 +1204,14 @@ class BaseSimProcessor:
         phase = np.angle(cross_corr_result)
         return kx, ky, phase, ampl
 
-    def _coarseFindCarrier_cupy(self, band0, band1, mask, eta):
+    def _coarseFindCarrier_cupy(self, band0, band1, mask):
         band0 = cp.asarray(band0)
         band1 = cp.asarray(band1)
         mask = cp.asarray(mask)
         kr = cp.asarray(self._kr)
 
-        otf_exclude_min_radius = eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
         motf = cp.fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
@@ -1256,15 +1234,15 @@ class BaseSimProcessor:
 
         return kx.get(), ky.get()
 
-    def _refineCarrier_cupy(self, band0, band1, kx_in, ky_in, eta):
+    def _refineCarrier_cupy(self, band0, band1, kx_in, ky_in):
         band0 = cp.asarray(band0)
         band1 = cp.asarray(band1)
 
-        pxc0 = np.int32(np.round(kx_in / self._dkx) + self.Nx // 2)
-        pyc0 = np.int32(np.round(ky_in / self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in/self._dkx) + self.Nx // 2)
+        pyc0 = np.int32(np.round(ky_in/self._dky) + self.Ny // 2)
 
-        otf_exclude_min_radius = eta / 2
-        otf_exclude_max_radius = eta * 2
+        otf_exclude_min_radius = self.eta/2
+        otf_exclude_max_radius = 1.5
 
         # kr = cp.sqrt(cp.asarray(self._kx) ** 2 + cp.asarray(self._ky) ** 2)
         kr = cp.asarray(self._kr, dtype=np.double)
@@ -1311,14 +1289,14 @@ class BaseSimProcessor:
         phase = cp.angle(cross_corr_result)
         return kx.get(), ky.get(), phase.get(), ampl.get()
 
-    def _coarseFindCarrier_pytorch(self, band0, band1, mask, eta):
+    def _coarseFindCarrier_pytorch(self, band0, band1, mask):
         band0 = torch.as_tensor(band0, device=self.tdev)
         band1 = torch.as_tensor(band1, device=self.tdev)
         mask = torch.as_tensor(mask, device=self.tdev)
         kr = torch.as_tensor(self._kr, device=self.tdev)
 
-        otf_exclude_min_radius = eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
-        otf_exclude_max_radius = eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_min_radius = self.eta / 2 # Min Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
+        otf_exclude_max_radius = self.eta * 2 # Max Radius of the circular region around DC that is to be excluded from the cross-correlation calculation
         maskbpf = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
 
         motf = torch.fft.fftshift(maskbpf / (self._tfm_pytorch(kr, maskbpf) + (~maskbpf) * 0.0001))
@@ -1345,15 +1323,15 @@ class BaseSimProcessor:
 
         return kx, ky
 
-    def _refineCarrier_pytorch(self, band0, band1, kx_in, ky_in, eta):
+    def _refineCarrier_pytorch(self, band0, band1, kx_in, ky_in):
         band0 = torch.as_tensor(band0, device=self.tdev)
         band1 = torch.as_tensor(band1, device=self.tdev)
 
-        pxc0 = np.int32(np.round(kx_in / self._dkx) + self.Nx // 2)
-        pyc0 = np.int32(np.round(ky_in / self._dky) + self.Ny // 2)
+        pxc0 = np.int32(np.round(kx_in/self._dkx) + self.Nx // 2)
+        pyc0 = np.int32(np.round(ky_in/self._dky) + self.Ny // 2)
 
-        otf_exclude_min_radius = eta / 2
-        otf_exclude_max_radius = eta * 2
+        otf_exclude_min_radius = self.eta / 2
+        otf_exclude_max_radius = self.eta * 2
 
         # kr = cp.sqrt(cp.asarray(self._kx) ** 2 + cp.asarray(self._ky) ** 2)
         kr = torch.as_tensor(self._kr, dtype=torch.float, device=self.tdev)
