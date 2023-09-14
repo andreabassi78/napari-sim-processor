@@ -658,15 +658,17 @@ class SimAnalysis(QWidget):
                 pc = np.zeros((len(kxs),2))
                 radii = []
                 colors = []
+                labels = []
                 for idx, (kx,ky) in enumerate(zip(kxs,kys)):
                     pc[idx,0] = ky[0] / dky + Ny/2
                     pc[idx,1] = kx[0] / dkx + Nx/2
                     radii.append(((Nx + Ny) // 60, (Nx + Ny) // 60)) # radius of the displayed circle
+                    labels.append(f'{self.h.ampl[idx, 0]:.3f}, {self.h.p[idx,0] * 180 / np.pi:.0f}')
                     if idx == self.carrier_idx.val:
                         colors.append('red')
                     else:
                         colors.append('yellow')
-                layer=self.add_circles(pc, radii, name, color=colors)
+                layer=self.add_circles(pc, radii, shape_name=name, labels=labels, color=colors)
                 self.move_layer_to_top(layer)
                 # kr = np.sqrt(kxs**2+kys**2)
                 # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
@@ -703,9 +705,8 @@ class SimAnalysis(QWidget):
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])   
 
-
-    def add_circles(self, locations, radii,
-                    shape_name='shapename', color='blue', hold=False):
+    def add_circles(self, locations, radii, shape_name='shapename', labels=[],
+                     color='blue'):
         '''
         Creates a circle in a layer with yx coordinates speciefied in each row of locations
         
@@ -719,9 +720,8 @@ class SimAnalysis(QWidget):
             radii of the circles.
         color : list of or single instance of str or RGBA list
             color of the circles.
-        hold : bool
-            if True updates the existing layer, with name shape_name,
-            without creating a new layer
+        labels : List
+            string or list of strings to use as labels
         '''
         ellipses = []
         for center, radius in zip(locations, radii):
@@ -731,19 +731,20 @@ class SimAnalysis(QWidget):
                              center + np.array([-radius[0], radius[1]])]
                             )
             ellipses.append(bbox)
-        
         if shape_name in self.viewer.layers: 
             circles_layer = self.viewer.layers[shape_name]
-            if hold:
-                circles_layer.add_ellipses(ellipses, edge_color=color)
-            else:
-                circles_layer.data = ellipses
-                circles_layer.edge_color = color
+            circles_layer.data = ellipses
+            circles_layer.edge_color = color
+            circles_layer.text = {'text': labels, 'color': 'red', 'translation': [-6, 0]}
         else:  
-            circles_layer = self.viewer.add_shapes(name=shape_name,
-                                   edge_width = 1.3,
-                                   face_color = [1, 1, 1, 0])
-            circles_layer.add_ellipses(ellipses, edge_color=color)
+            circles_layer = self.viewer.add_shapes(ellipses,
+                                                   name=shape_name,
+                                                   shape_type="ellipse",
+                                                   edge_width = 1.3,
+                                                   face_color = [1, 1, 1, 0],
+                                                   edge_color=color,
+                                                   text={'text': labels, 'color': 'red', 'translation': [-6, 0]})
+            # circles_layer.add_ellipses(ellipses, edge_color=color)
         return circles_layer
     
     
