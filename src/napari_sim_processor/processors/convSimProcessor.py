@@ -54,7 +54,9 @@ class ConvSimProcessor(BaseSimProcessor):
             plt.imshow(np.abs(ret))
         return ret
 
-class ConvSimProcessor3D(BaseSimProcessor):
+from .baseSimProcessor3D import BaseSimProcessor3D
+
+class ConvSimProcessor3D(BaseSimProcessor3D):
     '''
     Implements conventional SIM system with three beams, multiple angles and multiple phase steps
     The default number of angles is 3 and phase steps is 5
