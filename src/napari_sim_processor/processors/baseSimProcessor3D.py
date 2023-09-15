@@ -47,7 +47,7 @@ except:
 
 class BaseSimProcessor3D(BaseSimProcessor):
     def __init__(self):
-        super.__init__()
+        super().__init__()
 
     def calibrate(self, img, findCarrier=True):
         self._calibrate(img, findCarrier)
@@ -140,8 +140,9 @@ class BaseSimProcessor3D(BaseSimProcessor):
                 ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier(prepared_comp[0],
                                                                     prepared_comp[i + 1], self.kx[i],
                                                                     self.ky[i], self.eta * self.etafac[i])
-        # if self.etafac[i] < 1.0:
-        #     ampl[i,0] = 1.333
+            # For now compensate for 3D carrier component amplitude under-estimate with a simple 4x scaling factor.
+            if self.etafac[i] < 1.0:
+                ampl[i] *= 4.0
 
         self.kx = ckx # store found kx, ky, p and ampl values
         self.ky = cky
@@ -189,6 +190,9 @@ class BaseSimProcessor3D(BaseSimProcessor):
                     ckx[i], cky[i], p[i], ampl[i] = self._refineCarrier(prepared_comp[0],
                                                                         prepared_comp[i + 1], self.kx[i],
                                                                         self.ky[i], self.eta * self.etafac[i])
+                # For now compensate for 3D carrier component amplitude under-estimate with a simple 4x scaling factor.
+                if self.etafac[i] < 1.0:
+                    ampl[i] *= 4.0
             self.kx = ckx  # store found kx, ky, p and ampl values
             self.ky = cky
             self.p = p
