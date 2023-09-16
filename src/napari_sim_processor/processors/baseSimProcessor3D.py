@@ -376,7 +376,7 @@ class BaseSimProcessor3D(BaseSimProcessor):
             band0_common = fft.ifft2(fft.fft2(prepared_comp[0, :, :, :]) * motf)
             band1_common = fft.ifft2(fft.fft2(np.conjugate(prepared_comp[i + 1, :, :, :])) * motf)
             ix[i, :, :] = np.sum(band0_common * band1_common, axis=0)
-        ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(ix))))
+        ixf = np.abs(fft.fftshift(fft.fft2(ix), axes=(1,2)))
         return ixf
 
     def crossCorrelations_cupy(self, img):
@@ -413,10 +413,10 @@ class BaseSimProcessor3D(BaseSimProcessor):
             motf = fft.fftshift(maskbpf / (self._tfm_cupy(kr, maskbpf) + (1 - maskbpf) * 0.0001))
 
             band0_common = cp.fft.ifft2(cp.fft.fft2(sum_prepared_comp[0, :, :]) * motf)
-            band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[i + 1, :, :])) * motf)
+            band1_common = cp.fft.fft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[i + 1, :, :])) * motf)
             ix[i, :, :] = band0_common * band1_common
 
-        ixf = cp.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ix)))).get()
+        ixf = cp.abs(cp.fft.fftshift(cp.fft.fft2(ix), axes=(1,2))).get()
         return ixf
 
     def crossCorrelations_pytorch(self, img):
@@ -456,7 +456,7 @@ class BaseSimProcessor3D(BaseSimProcessor):
             band1_common = torch.fft.ifft2(torch.fft.fft2(torch.conj(sum_prepared_comp[i + 1, :, :])) * motf)
             ix[i, :, :] = band0_common * band1_common
 
-        ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(ix)))).cpu().numpy()
+        ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(ix), dim=(1,2))).cpu().numpy()
         return ixf
 
     def find_phase_pytorch(self, kx, ky, img):
