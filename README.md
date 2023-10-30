@@ -10,18 +10,16 @@
 A Napari plugin for the reconstruction of Structured Illumination Microscopy (SIM) with GPU acceleration (pytorch/cupy if installed).
 Currently supports:    
    - conventional SIM data with a generic number of angles and phases (typically, 3 angles and 3 phases are used for resolution improvement in 2D, but any combination can be processed by the widget)
-   - hexagonal SIM data with 7 phases.
-   - square (`x`=`y`) or rectangular images.
+   - hexagonal SIM data with 7 phases, as described in [this] publication.
+   - 3D SIM, for resolution enhancement in three dimensions. This is available in the [3dSIM] branch  
 
 The SIM processing widget accepts image stacks organized in 5D (`angle`,`phase`,`z`,`y`,`x`).
 
 The reshape widget can be used to easily reshape the data if they are not organized as 5D (angle,phase,z,y,x).
 
-For 3D stacks (raw images) with multiple z-frames, a batch reconstruction method is available, as described here:
-	https://doi.org/10.1098/rsta.2020.0162
+For 3D stacks (raw images) with multiple z-frames, a batch reconstruction method is available, as described [here].
+	
         
-Support for 3D SIM with enhanced resolution in all directions is not yet available.
-Multicolor reconstruction is not yet available.  
 
 ----------------------------------
 
@@ -71,7 +69,7 @@ To install latest development version :
    - `eta`: constant used for calibration. It should be slightly smaller than the carrier frequency (in pupil radius units).
    - `group`: for stacks with multiple z-frames, it is the number of frames that are used together for the calibration process.
 	
-For details on the other parameters see https://doi.org/10.1098/rsta.2020.0162.
+For details on the other parameters see [here].
 
 8) Calibrate the SIM processor, pressing the `Calibrate` button. This will find the carrier frequencies (red circles if the `Show Carrier` checkbox is selected), the modulation amplitude and the phase, using cross correlation analysis.
 
@@ -139,3 +137,7 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [tox]: https://tox.readthedocs.io/en/latest/
 [pip]: https://pypi.org/project/pip/
 [PyPI]: https://pypi.org/
+
+[here]: https://doi.org/10.1098/rsta.2020.0162
+[this]: https://doi.org/10.1364/OE.466225
+[3dSIM]: https://github.com/andreabassi78/napari-sim-processor/tree/3dSIM
