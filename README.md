@@ -18,9 +18,7 @@ The SIM processing widget accepts image stacks organized in 5D (`angle`,`phase`,
 The reshape widget can be used to easily reshape the data if they are not organized as 5D (angle,phase,z,y,x).
 
 For 3D stacks (raw images) with multiple z-frames, a batch reconstruction method is available, as described [here].
-	
-        
-
+	 
 ----------------------------------
 
 This [napari] plugin was generated with [Cookiecutter] using [@napari]'s [cookiecutter-napari-plugin] template.
