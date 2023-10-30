@@ -106,7 +106,7 @@ class Setting():
         elif dtype == bool:
             sbox = QCheckBox()
             self.set_func = sbox.setChecked
-            self.get_func = sbox.checkState
+            self.get_func = sbox.isChecked
             change_func = sbox.stateChanged
         
         else: raise(TypeError( 'Specified setting type not supported'))

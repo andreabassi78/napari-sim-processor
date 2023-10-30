@@ -7,7 +7,7 @@ from .widget_settings import Setting, Combo_box
 from .processors.baseSimProcessor import pytorch, cupy
 from .processors.hexSimProcessor import HexSimProcessor
 from .processors.raSimProcessor import RaSimProcessor
-from .processors.convSimProcessor import ConvSimProcessor
+from .processors.convSimProcessor import ConvSimProcessor, ConvSimProcessor3D
 import napari
 from qtpy.QtWidgets import QVBoxLayout, QSplitter, QHBoxLayout, QWidget, QPushButton, QLineEdit
 from qtpy.QtCore import Qt
@@ -26,6 +26,7 @@ class Sim_modes(Enum):
     SIM = 1
     HEXSIM = 2
     RASIM = 3
+    SIM3D = 4
 
 
 class Accel(Enum):
@@ -102,15 +103,15 @@ def reshape(viewer: napari.Viewer,
     '''
     data = input_image.data
     if angles*phases*z*y*x != data.size:
-        raise(ValueError('Input image cannot be reshaped to the given values'))
+        raise(ValueError(f'Input image {data.size} cannot be reshaped to the given values {angles*phases*z*y*x}'))
     else:
         if input_order == 'apzyx':
             rdata = data.reshape(angles, phases, z, y, x)
         elif input_order == 'pazyx':
             #rdata = np.swapaxes(data.reshape(phases, angles, z, y, x),0,1)
-            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x),[0,1],[1,0])
+            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x), [0, 1], [1, 0])
         elif input_order == 'pzayx':
-            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x),[0,1,2],[1,2,0])
+            rdata = np.moveaxis(data.reshape(phases, z, angles, y, x), [0, 1, 2], [1, 2, 0])
         elif input_order == 'azpyx':
             rdata = np.moveaxis(data.reshape(angles, z, phases, y, x), [1, 2], [2, 1])
         elif input_order == 'zapyx':
@@ -351,8 +352,10 @@ class SimAnalysis(QWidget):
             if self.step_changed(0,2,3,4):
                 self.setReconstructor()
             delta_t = time.time() - t0
-            self.on_step_change.set_timeout(int(delta_t)+1)
-
+            try:
+                self.on_step_change.setTimeout(int(delta_t)+1)  # for supetqt >0.5.0
+            except:
+                self.on_step_change.set_timeout(int(delta_t)+1)  # for supetqt <=0.5.0
 
     def step_changed(self, *step_indexes):
         """
@@ -508,7 +511,11 @@ class SimAnalysis(QWidget):
                 elif self.sim_mode.current_data == Sim_modes.SIM.value and self.phases_number.val >= 3 and self.angles_number.val > 0:
                     self.h = ConvSimProcessor(angleSteps=self.angles_number.val,
                                               phaseSteps=self.phases_number.val)
-                    k_shape = (self.angles_number.val,1)
+                    k_shape = (self.angles_number.val, 1)
+                elif self.sim_mode.current_data == Sim_modes.SIM3D.value and self.phases_number.val >= 5 and self.angles_number.val > 0:
+                    self.h = ConvSimProcessor3D(angleSteps=self.angles_number.val,
+                                              phaseSteps=self.phases_number.val)
+                    k_shape = (self.angles_number.val * 2, 1)
                 elif self.sim_mode.current_data == Sim_modes.RASIM.value:
                     self.h = RaSimProcessor(self.phases_number.val)
                     k_shape = (2, 1)
@@ -616,8 +623,8 @@ class SimAnalysis(QWidget):
         self.show_wiener()
         self.show_spectrum()
         self.show_xcorr()
-        self.show_carrier()
         self.show_eta()
+        self.show_carrier()
 
     
     def calculate_kr(self,N):  
@@ -653,15 +660,17 @@ class SimAnalysis(QWidget):
                 pc = np.zeros((len(kxs),2))
                 radii = []
                 colors = []
+                labels = []
                 for idx, (kx,ky) in enumerate(zip(kxs,kys)):
                     pc[idx,0] = ky[0] / dky + Ny/2
                     pc[idx,1] = kx[0] / dkx + Nx/2
                     radii.append(((Nx + Ny) // 60, (Nx + Ny) // 60)) # radius of the displayed circle
+                    labels.append(f'{self.h.ampl[idx, 0]:.3f}, {self.h.p[idx,0] * 180 / np.pi:.0f}')
                     if idx == self.carrier_idx.val:
                         colors.append('red')
                     else:
                         colors.append('yellow')
-                layer=self.add_circles(pc, radii, name, color=colors)
+                layer=self.add_circles(pc, radii, shape_name=name, labels=labels, color=colors)
                 self.move_layer_to_top(layer)
                 # kr = np.sqrt(kxs**2+kys**2)
                 # print('Carrier magnitude / cut off:', *kr/cutoff*dk)
@@ -679,13 +688,14 @@ class SimAnalysis(QWidget):
             centres = []
             radii = []
             colors = []
+            band_idx = self.carrier_idx.val
             if self.showEta.val:
                 Nx = self.h.Nx
                 Ny = self.h.Ny
                 cutoffx, dkx   = self.calculate_kr(Nx)
                 cutoffy, dky   = self.calculate_kr(Ny)
-                eta_radiusx = 1.9 * self.h.eta * cutoffx
-                eta_radiusy = 1.9 * self.h.eta * cutoffy
+                eta_radiusx = 1.9 * self.h.eta * self.h.etafac[band_idx] * cutoffx
+                eta_radiusy = 1.9 * self.h.eta * self.h.etafac[band_idx] * cutoffy
                 centres.append(np.array([Ny/2,Nx/2]))
                 radii.append((eta_radiusy, eta_radiusx))
                 colors.append('green')
@@ -697,9 +707,8 @@ class SimAnalysis(QWidget):
             elif name in self.viewer.layers:
                 self.remove_layer(self.viewer.layers[name])   
 
-
-    def add_circles(self, locations, radii,
-                    shape_name='shapename', color='blue', hold=False):
+    def add_circles(self, locations, radii, shape_name='shapename', labels=[],
+                     color='blue'):
         '''
         Creates a circle in a layer with yx coordinates speciefied in each row of locations
         
@@ -713,9 +722,8 @@ class SimAnalysis(QWidget):
             radii of the circles.
         color : list of or single instance of str or RGBA list
             color of the circles.
-        hold : bool
-            if True updates the existing layer, with name shape_name,
-            without creating a new layer
+        labels : List
+            string or list of strings to use as labels
         '''
         ellipses = []
         for center, radius in zip(locations, radii):
@@ -725,18 +733,20 @@ class SimAnalysis(QWidget):
                              center + np.array([-radius[0], radius[1]])]
                             )
             ellipses.append(bbox)
-        
         if shape_name in self.viewer.layers: 
             circles_layer = self.viewer.layers[shape_name]
-            if hold:
-                circles_layer.add_ellipses(ellipses, edge_color=color)
-            else:
-                circles_layer.data = ellipses
+            circles_layer.data = ellipses
+            circles_layer.edge_color = color
+            circles_layer.text = {'text': labels, 'color': 'red', 'translation': [-6, 0]}
         else:  
-            circles_layer = self.viewer.add_shapes(name=shape_name,
-                                   edge_width = 1.3,
-                                   face_color = [1, 1, 1, 0])
-            circles_layer.add_ellipses(ellipses, edge_color=color)
+            circles_layer = self.viewer.add_shapes(ellipses,
+                                                   name=shape_name,
+                                                   shape_type="ellipse",
+                                                   edge_width = 1.3,
+                                                   face_color = [1, 1, 1, 0],
+                                                   edge_color=color,
+                                                   text={'text': labels, 'color': 'red', 'translation': [-6, 0]})
+            # circles_layer.add_ellipses(ellipses, edge_color=color)
         return circles_layer
     
     
@@ -914,8 +924,9 @@ class SimAnalysis(QWidget):
             self.find_hexsim_phaseshifts()
         elif self.sim_mode.current_data == Sim_modes.SIM.value:
             self.find_sim_phaseshifts()
-        
-        
+        # elif self.sim_mode.current_data == Sim_modes.SIM3D.value:
+        #     self.find_sim3D_phaseshifts()
+
     def find_hexsim_phaseshifts(self):
         nbands = self.h._nbands
         nsteps = self.h._nsteps
@@ -936,7 +947,8 @@ class SimAnalysis(QWidget):
             expected_phase[:,i] = np.arange(nsteps) * 2*(i+1) * np.pi / nsteps
             phaseshift[:,i] = np.unwrap(phase - phase[0] - expected_phase[:,i]) + expected_phase[:,i]
         error = phaseshift-expected_phase
-        data_to_plot = [expected_phase, phaseshift, error]
+        mean_err = np.mean(error, 0)
+        data_to_plot = [expected_phase, phaseshift - mean_err, error - mean_err]
         symbols = ['.','o','|']
         legend = ['expected', 'measured', 'error']
         self.plot_with_plt(data_to_plot, legend, symbols,

@@ -55,11 +55,9 @@ class BaseSimProcessor:
     alpha = 0.3     # zero order attenuation width
     beta = 0.95     # zero order attenuation
     w = 0.3         # Wiener parameter
-    eta = 0.75      # eta is the factor by which the illumination grid frequency
+    eta = 0.75      # eta defines the search radius for illumination carrier frequencies
     a = 0.25         # otf attenuation factor (a = 1 gives no correction)
     a_type = 'none'   # otf attenuation type ( 'exp' or 'sph' or 'none')
-    # exceeds the incoherent cutoff, eta=1 for normal SIM, eta=sqrt(3)/2 to maximise
-    # resolution without zeros in TF carrier is 2*kmax*eta
     debug = True    # Set to False (or 0) for no debug information,
                     # to True (or 1) for minimal information,
                     # to integers > 1 for extra information
@@ -93,7 +91,7 @@ class BaseSimProcessor:
             self._bigimgstore_cp = cp.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
         if pytorch:
             if self.tdev is None:
-                if torch.has_cuda:
+                if torch.cuda.is_available() and torch.cuda.device_count() > 0:
                     self.tdev = torch.device('cuda')
                 else:
                     self.tdev = torch.device('cpu')
@@ -356,6 +354,7 @@ class BaseSimProcessor:
             plt.figure()
             plt.title('output apodisation')
             plt.imshow(mtot * self._tf(1.99 * krbig * mtot / kmax, a_type = 'none'))
+            plt.show()
 
         if useTorch:
             mtot_pt = torch.as_tensor(mtot, device=self.tdev)
@@ -425,7 +424,7 @@ class BaseSimProcessor:
         band1_common = fft.ifft2(fft.fft2(np.conjugate(sum_prepared_comp[1:, :, :])) * motf)
         ix = band0_common * band1_common
 
-        ixf = np.abs(fft.fftshift(fft.fft2(fft.fftshift(ix))))
+        ixf = np.abs(fft.fftshift(fft.fft2(ix), axes=(1, 2)))
         return ixf
 
     def crossCorrelations_cupy(self, img):
@@ -463,7 +462,7 @@ class BaseSimProcessor:
         band1_common = cp.fft.ifft2(cp.fft.fft2(cp.conjugate(sum_prepared_comp[1:, :, :])) * motf)
         ix = band0_common * band1_common
 
-        ixf = cp.abs(cp.fft.fftshift(cp.fft.fft2(cp.fft.fftshift(ix)))).get()
+        ixf = cp.abs(cp.fft.fftshift(cp.fft.fft2(ix), axes=(1, 2))).get()
         return ixf
 
     def crossCorrelations_pytorch(self, img):
@@ -501,7 +500,7 @@ class BaseSimProcessor:
         band1_common = torch.fft.ifft2(torch.fft.fft2(torch.conj(sum_prepared_comp[1:, :, :])) * motf)
         ix = band0_common * band1_common
 
-        ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(torch.fft.fftshift(ix)))).cpu().numpy()
+        ixf = torch.abs(torch.fft.fftshift(torch.fft.fft2(ix), dim=(1, 2))).cpu().numpy()
         return ixf
 
     def WFreconstruct(self, img):
@@ -805,6 +804,8 @@ class BaseSimProcessor:
             self._carray1[:, 3 * self.Ny // 2:2 * self.Ny, 0:self.Nx // 2 + 1] = imf[i:i + self._nsteps, self.Ny // 2:self.Ny,
                                                                               0:self.Nx // 2 + 1]
             img2[i:i + self._nsteps, :, :] = fft.irfft2(self._carray1) * self._reconfactor
+
+        self.img2 = img2
         img3 = np.zeros((nimg, 2 * self.Ny, 2 * self.Nx), dtype=np.single)
 
         for offs in range(0, 2 * self.Ny - blocksize, blocksize):
@@ -950,17 +951,13 @@ class BaseSimProcessor:
     def batchreconstructcompact_pytorch(self, img, blocksize=128):
         assert pytorch, "No pytorch present"
         res = self._batchreconstructcompactworker_pytorch(img, blocksize=blocksize)
-        if torch.has_cuda:
+        if torch.cuda.device_count() > 0:
             torch.cuda.empty_cache()
         assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
         return res
 
     def batchreconstruct_pytorch(self, img):
         assert pytorch, "No pytorch present"
-        if torch.has_cuda:
-            dev = torch.device('cuda')
-        else:
-            dev = torch.device('cpu')
         nim = img.shape[0]
         r = np.mod(nim, self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
@@ -1258,7 +1255,9 @@ class BaseSimProcessor:
         band = band0_common * band1_common
 
         mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
-        ixfz, Kx, Ky = self._zoomf_cupy(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
+        ixfz, Kx, Ky = self._zoomf_cupy(band, (self.Ny, self.Nx),
+                                        np.single(self._kx[pxc0]).item(), np.single(self._ky[pyc0]).item(),
+                                        mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_cupy(abs(ixfz))
 
         if self.debug:
@@ -1338,8 +1337,8 @@ class BaseSimProcessor:
         otf = torch.fft.fftshift(self._tfm_pytorch(kr, m) + (~m)*0.0001)
 
         otf_mask = (kr > otf_exclude_min_radius) & (kr < otf_exclude_max_radius)
-        shiftx = pxc0 - (self.Nx // 2)
-        shifty = pyc0 - (self.Ny // 2)
+        shiftx = int(pxc0 - (self.Nx // 2))
+        shifty = int(pyc0 - (self.Ny // 2))
         otf_mask_shifted = torch.roll(otf_mask, shifts=(shifty, shiftx), dims=(0, 1))
         if shiftx < 0:
             otf_mask_shifted[:, shiftx:] = False
@@ -1373,7 +1372,7 @@ class BaseSimProcessor:
             ax.add_artist(circle)
 
         mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
-        ixfz, Kx, Ky = self._zoomf_pytorch(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
+        ixfz, Kx, Ky = self._zoomf_pytorch(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]).item(), np.single(self._ky[pyc0]).item(), mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_pytorch(abs(ixfz))
 
         if self.debug:
@@ -1438,7 +1437,10 @@ class BaseSimProcessor:
                                 torch.exp(torch.tensor(-1j * pi * (1 / mag[0] - 2 * ky / kmax), device=self.tdev)))
         res = self._pyczt_pytorch(resy.T, M[1], torch.exp(torch.tensor(-1j * 2 * pi / (mag[1] * M[1]), device=self.tdev)),
                                torch.exp(torch.tensor(-1j * pi * (1 / mag[1] - 2 * kx / kmax), device=self.tdev))).T
-        kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
+        a = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2
+        b = (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
+        kyarr = a + b
+        # kyarr = -kmax * (1 / mag[0] - 2 * ky / kmax) / 2 + (kmax / (mag[0] * M[0])) * torch.arange(0, M[0], device=self.tdev)
         kxarr = -kmax * (1 / mag[1] - 2 * kx / kmax) / 2 + (kmax / (mag[1] * M[1])) * torch.arange(0, M[1], device=self.tdev)
         dim = in_arr.shape
         # remove phase tilt from (0,0) offset in spatial domain
