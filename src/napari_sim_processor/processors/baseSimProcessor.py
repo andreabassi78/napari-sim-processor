@@ -91,7 +91,7 @@ class BaseSimProcessor:
             self._bigimgstore_cp = cp.zeros((2 * self.Ny, 2 * self.Nx), dtype=np.single)
         if pytorch:
             if self.tdev is None:
-                if torch.has_cuda:
+                if torch.cuda.is_available() and torch.cuda.device_count() > 0:
                     self.tdev = torch.device('cuda')
                 else:
                     self.tdev = torch.device('cpu')
@@ -951,17 +951,13 @@ class BaseSimProcessor:
     def batchreconstructcompact_pytorch(self, img, blocksize=128):
         assert pytorch, "No pytorch present"
         res = self._batchreconstructcompactworker_pytorch(img, blocksize=blocksize)
-        if torch.has_cuda:
+        if torch.cuda.device_count() > 0:
             torch.cuda.empty_cache()
         assert not isinstance(res, str), res    # if something went wrong in the worker function then a string is returned
         return res
 
     def batchreconstruct_pytorch(self, img):
         assert pytorch, "No pytorch present"
-        if torch.has_cuda:
-            dev = torch.device('cuda')
-        else:
-            dev = torch.device('cpu')
         nim = img.shape[0]
         r = np.mod(nim, self._nsteps)
         if r > 0:  # pad with empty frames so total number of frames is divisible by self._nsteps
@@ -1259,7 +1255,9 @@ class BaseSimProcessor:
         band = band0_common * band1_common
 
         mag = (25 * self.Ny / 256, 25 * self.Nx / 256)
-        ixfz, Kx, Ky = self._zoomf_cupy(band, (self.Ny, self.Nx), np.single(self._kx[pxc0]), np.single(self._ky[pyc0]), mag, self._dkx * self.Nx)
+        ixfz, Kx, Ky = self._zoomf_cupy(band, (self.Ny, self.Nx),
+                                        np.single(self._kx[pxc0]).item(), np.single(self._ky[pyc0]).item(),
+                                        mag, self._dkx * self.Nx)
         pyc, pxc = self._findPeak_cupy(abs(ixfz))
 
         if self.debug:
