@@ -352,8 +352,10 @@ class SimAnalysis(QWidget):
             if self.step_changed(0,2,3,4):
                 self.setReconstructor()
             delta_t = time.time() - t0
-            self.on_step_change.set_timeout(int(delta_t)+1)
-
+            try:
+                self.on_step_change.setTimeout(int(delta_t)+1)  # for supetqt >0.5.0
+            except:
+                self.on_step_change.set_timeout(int(delta_t)+1)  # for supetqt <=0.5.0
 
     def step_changed(self, *step_indexes):
         """
