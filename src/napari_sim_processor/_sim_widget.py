@@ -188,7 +188,7 @@ class SimAnalysis(QWidget):
                                        write_function = self.setReconstructor)
         self.n = Setting(name ='n', dtype=float, initial=1.33,  spinbox_decimals=2,
                                       layout=left_layout, write_function = self.setReconstructor)
-        self.wavelength = Setting('\u03BB', dtype=float, initial=0.530,
+        self.wavelength = Setting('\u03BB', dtype=float, initial=0.540,
                                        layout=left_layout,  spinbox_decimals=2, unit = '\u03BCm',
                                        write_function = self.setReconstructor)
         self.pixelsize = Setting('pixel size', dtype=float, initial=6.50, layout=left_layout,
