@@ -184,17 +184,17 @@ class SimAnalysis(QWidget):
                               write_function = self.reset_processor)
         self.magnification = Setting('M', dtype=float, initial=60,  
                                       layout=left_layout, write_function = self.setReconstructor)
-        self.NA = Setting('NA', dtype=float, initial=1.05, layout=left_layout, 
+        self.NA = Setting('NA', dtype=float, initial=1.0, layout=left_layout, 
                                        write_function = self.setReconstructor)
         self.n = Setting(name ='n', dtype=float, initial=1.33,  spinbox_decimals=2,
                                       layout=left_layout, write_function = self.setReconstructor)
-        self.wavelength = Setting('\u03BB', dtype=float, initial=0.570,
+        self.wavelength = Setting('\u03BB', dtype=float, initial=0.530,
                                        layout=left_layout,  spinbox_decimals=2, unit = '\u03BCm',
                                        write_function = self.setReconstructor)
         self.pixelsize = Setting('pixel size', dtype=float, initial=6.50, layout=left_layout,
                                   spinbox_decimals=2, unit = '\u03BCm',
                                   write_function = self.setReconstructor)
-        self.dz = Setting('dz', dtype=float, initial=0.55, layout=left_layout,
+        self.dz = Setting('dz', dtype=float, initial=0.45, layout=left_layout,
                                   spinbox_decimals=2, unit = '\u03BCm',
                                   write_function = self.rescaleZ)
         self.alpha = Setting('alpha', dtype=float, initial=0.5,  spinbox_decimals=2, 
